@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import sqlite3
-from aiohttp import web  # <--- MANA SHU SATRNI QO'SHING
+from aiohttp import web
 from datetime import datetime
 from html import escape
 from typing import Final, Any, Optional
@@ -11,18 +11,22 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, or_f
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton,
-    Message, CallbackQuery, BotCommand
+    Message, CallbackQuery, BotCommand, InlineKeyboardMarkup
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
+from dotenv import load_dotenv
+
+# .env faylini yuklash
+load_dotenv()
+
 try:
     from groq import Groq
 except Exception:
     Groq = None
-
 
 # ==========================================================================================
 # 💎 PREMIUM KONFIGURATSIYA
@@ -62,7 +66,7 @@ class Assets:
     ADM_STATS = "📊 Umumiy Statistika"
     ADM_DAILY_STATS = "📊 Kunlik Statistika"
     ADM_DEL_TEST = "🗑 Testni O'chirish"
-
+    ADM_BROADCAST = "📢 Barchaga Xabar"
     @staticmethod
     def progress_bar(perc: float) -> str:
         full = max(0, min(10, int(perc // 10)))
@@ -189,7 +193,7 @@ class Form(StatesGroup):
     adm_add_daily_title = State()
     adm_add_daily_ans = State()
     adm_add_daily_file = State()
-
+    adm_broadcast = State()
 
 # ==========================================================================================
 # 🎨 UI
@@ -206,16 +210,16 @@ class UI:
             b.row(KeyboardButton(text=Assets.ICO_ADM))
         b.adjust(2, 2, 2, 1)
         return b.as_markup(resize_keyboard=True)
-
     @staticmethod
     def admin_menu():
         b = ReplyKeyboardBuilder()
         b.row(KeyboardButton(text=Assets.ADM_ADD_TEST), KeyboardButton(text=Assets.ADM_ADD_DAILY))
         b.row(KeyboardButton(text=Assets.ADM_STATS), KeyboardButton(text=Assets.ADM_DAILY_STATS))
-        b.row(KeyboardButton(text=Assets.ADM_DEL_TEST))
+        b.row(KeyboardButton(text=Assets.ADM_DEL_TEST), KeyboardButton(text=Assets.ADM_BROADCAST))
         b.row(KeyboardButton(text=Assets.ICO_HOME))
-        b.adjust(2, 2, 1, 1)
+        b.adjust(2, 2, 2, 1)
         return b.as_markup(resize_keyboard=True)
+        
 
     @staticmethod
     def back_btn():
@@ -948,26 +952,82 @@ async def confirm_del(call: CallbackQuery):
     await call.answer("Test o'chirildi!", show_alert=True)
     await call.message.edit_text(f"🏁 <b>{kod}</b> kodli test tizimdan o'chirildi.")
 
-
-@dp.message(F.text == Assets.ADM_STATS)
-async def adm_general_stats(message: Message):
-    if message.from_user.id != Assets.ADMIN_ID:
-        return
+# ==========================================================================================
+# BATAFSIL STATISTIKA - YANGILANGAN
+# ==========================================================================================
+async def show_general_stats(message_or_call):
+    tests = DB.run("SELECT kod, title FROM tests ORDER BY created_at DESC", fetch="all")
     u_count = DB.run("SELECT COUNT(*) as c FROM users", fetch="one")["c"]
-    t_count = DB.run("SELECT COUNT(*) as c FROM tests", fetch="one")["c"]
     r_count = DB.run("SELECT COUNT(*) as c FROM results", fetch="one")["c"]
 
     res_text = (
         f"📊 <b>UMUMIY TIZIM STATISTIKASI</b>\n"
         f"{Assets.D_LINE}\n"
         f"👥 Foydalanuvchilar: <b>{u_count} ta</b>\n"
-        f"📚 Jami testlar: <b>{t_count} ta</b>\n"
-        f"📝 Jami topshirilganlar: <b>{r_count} ta</b>\n"
-        f"{Assets.S_LINE}"
+        f"📝 Tizimdagi testlar topshirildi: <b>{r_count} marta</b>\n"
+        f"{Assets.S_LINE}\n"
+        f"<i>Batafsil ma'lumot olish uchun quyidagi testlardan birini tanlang:</i>"
     )
-    await message.answer(res_text, parse_mode="HTML")
+    
+    kb = InlineKeyboardBuilder()
+    for t in tests:
+        kb.row(InlineKeyboardButton(text=f"📂 {t['title']} ({t['kod']})", callback_data=f"stat_{t['kod']}"))
 
+    if isinstance(message_or_call, Message):
+        await message_or_call.answer(res_text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    else:
+        await message_or_call.message.edit_text(res_text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
+@dp.message(F.text == Assets.ADM_STATS)
+async def adm_general_stats(message: Message):
+    if message.from_user.id != Assets.ADMIN_ID: return
+    await show_general_stats(message)
+
+@dp.callback_query(F.data.startswith("stat_"))
+async def detailed_test_stats(call: CallbackQuery):
+    if call.from_user.id != Assets.ADMIN_ID: return
+    kod = call.data.split("_", 1)[1]
+    
+    # Ma'lumotlarni yig'ish (Kim qancha ishlagan, eng baland balli)
+    results = DB.run("""
+        SELECT u.fullname, COUNT(r.rid) as tries, MAX(r.ball) as m_ball, MAX(r.total) as total, MAX(r.perc) as m_perc 
+        FROM results r JOIN users u ON r.uid = u.uid 
+        WHERE r.kod = ? 
+        GROUP BY u.uid 
+        ORDER BY m_perc DESC
+    """, (kod,), fetch="all")
+
+    test = DB.run("SELECT title FROM tests WHERE kod=?", (kod,), fetch="one")
+    t_name = test['title'] if test else "Noma'lum"
+
+    if not results:
+        await call.answer("Bu testni hali hech kim ishlamagan!", show_alert=True)
+        return
+
+    text = (
+        f"📈 <b>TEST STATISTIKASI: BATAFSIL</b>\n"
+        f"{Assets.D_LINE}\n"
+        f"🏷 Fan: <b>{t_name}</b>\n"
+        f"🔑 Kod: <code>{kod}</code>\n"
+        f"👥 Test ishlaganlar soni: <b>{len(results)} kishi</b>\n"
+        f"{Assets.S_LINE}\n\n"
+    )
+
+    for i, r in enumerate(results, 1):
+        text += f"<b>{i}. {escape(r['fullname'])}</b>\n└ 🏆 {r['m_ball']}/{r['total']} ({r['m_perc']:.1f}%) | 🔄 {r['tries']} marta ishlagan\n\n"
+
+    # Agar ro'yxat juda uzun bo'lib ketsa telegram kesib qoymasligi uchun
+    if len(text) > 4000: text = text[:4000] + "...\n(Ro'yxat uzun)"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_stats")]])
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+
+@dp.callback_query(F.data == "back_to_stats")
+async def back_to_stats_list(call: CallbackQuery):
+    if call.from_user.id != Assets.ADMIN_ID: return
+    await show_general_stats(call)
+#--------------------------------------------------
+#kunlik statistika ----------------------------
 @dp.message(F.text == Assets.ADM_DAILY_STATS)
 async def adm_daily_stats(message: Message):
     if message.from_user.id != Assets.ADMIN_ID:
@@ -993,7 +1053,65 @@ async def adm_daily_stats(message: Message):
 async def cancel_adm(call: CallbackQuery):
     await call.message.edit_text("🚫 <b>Amal bekor qilindi.</b>", parse_mode="HTML")
 
+# ==========================================================================================
+# ADMIN BOSH MENU
+# ==========================================================================================
+@dp.message(F.text == Assets.ICO_ADM)
+async def admin_portal(message: Message):
+    if message.from_user.id != Assets.ADMIN_ID: return
+    await message.answer(
+        f"<b>{Assets.D_LINE}</b>\n⚡️ <b>ADMINISTRATOR DASHBOARD</b>\n<b>{Assets.D_LINE}</b>\n\nBoshqarish uchun menyuni ishlating:",
+        reply_markup=UI.admin_menu(), parse_mode="HTML"
+    )
 
+# ==========================================================================================
+# XABAR YUBORISH (BROADCAST) - YANGI
+# ==========================================================================================
+@dp.message(F.text == Assets.ADM_BROADCAST)
+async def broadcast_start(message: Message, state: FSMContext):
+    if message.from_user.id != Assets.ADMIN_ID: return
+    await state.set_state(Form.adm_broadcast)
+    await message.answer(
+        f"📢 <b>BARCHAGA XABAR YUBORISH</b>\n"
+        f"{Assets.S_LINE}\n"
+        f"Barcha foydalanuvchilarga bormog'i kerak bo'lgan xabarni yuboring.\n"
+        f"<i>Matn, rasm yoki link shaklida bo'lishi mumkin.</i>",
+        reply_markup=UI.back_btn(),
+        parse_mode="HTML"
+    )
+
+@dp.message(Form.adm_broadcast)
+async def broadcast_send(message: Message, state: FSMContext):
+    if message.from_user.id != Assets.ADMIN_ID: return
+    
+    users = DB.run("SELECT uid FROM users", fetch="all")
+    msg_text = message.text or ""
+    
+    await message.answer("🔄 <i>Xabar barchaga yuborilmoqda, biroz kuting...</i>", parse_mode="HTML")
+    success, fail = 0, 0
+    
+    for u in users:
+        try:
+            design_msg = (
+                f"✨ <b>LOGOS PLATINUM ACADEMY</b> ✨\n"
+                f"{Assets.D_LINE}\n\n"
+                f"{msg_text}\n\n"
+                f"{Assets.D_LINE}\n"
+                f"<i>Hurmat bilan, Ma'muriyat 👑</i>"
+            )
+            await bot.send_message(u['uid'], design_msg, parse_mode="HTML")
+            success += 1
+            await asyncio.sleep(0.05) # Anti-spam
+        except Exception:
+            fail += 1
+
+    await message.answer(
+        f"✅ <b>Xabaringiz barchaga yetkazildi!</b>\n\n"
+        f"🟢 Yetib bordi: <b>{success} ta</b> foydalanuvchi\n"
+        f"🔴 Bloklaganlar: <b>{fail} ta</b>",
+        reply_markup=UI.admin_menu(), parse_mode="HTML"
+    )
+    await state.clear()
 # ==========================================================================================
 # MAIN
 # ==========================================================================================
