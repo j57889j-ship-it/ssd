@@ -2,6 +2,13 @@ import asyncio
 import logging
 import os
 import sqlite3
+from aiogram import Bot, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+import html
+from datetime import datetime
 from aiohttp import web
 from datetime import datetime
 from html import escape
@@ -266,53 +273,128 @@ def get_active_daily_test():
 
 
 # ==========================================================================================
-# START / RESET
+# SOZLAMALAR: Majburiy kanallar ro'yxati (Bot bu kanallarda ADMIN bo'lishi shart!)
 # ==========================================================================================
-@dp.message(or_f(Command("start"), F.text == Assets.ICO_HOME, F.text == Assets.ICO_BACK))
-async def global_reset(message: Message, state: FSMContext):
-    await state.clear()
-    DB.setup()
+REQUIRED_CHANNELS = [
+    {"name": "📢 Asosiy Kanal", "id": "@alo_math"},
 
-    user = DB.run("SELECT * FROM users WHERE uid=?", (message.from_user.id,), fetch="one")
+]
+
+async def is_subscribed(bot: Bot, user_id: int) -> bool:
+    """Foydalanuvchi barcha majburiy kanallarga obuna bo'lganligini tekshirish"""
+    for channel in REQUIRED_CHANNELS:
+        try:
+            member = await bot.get_chat_member(chat_id=channel["id"], user_id=user_id)
+            if member.status in ['left', 'kicked', 'banned']:
+                return False
+        except Exception:
+            # Agar bot kanalda admin bo'lmasa yoki kanal topilmasa xato bermasligi uchun
+            return False 
+    return True
+
+def get_subscription_keyboard():
+    """Majburiy obuna tugmalarini yasash"""
+    builder = InlineKeyboardBuilder()
+    for channel in REQUIRED_CHANNELS:
+        # ID orqali kanal ssilkasi yaratiladi
+        url = f"https://t.me/{channel['id'].replace('@', '')}"
+        builder.row(InlineKeyboardButton(text=channel["name"], url=url))
+    
+    # Tasdiqlash tugmasi
+    builder.row(InlineKeyboardButton(text="✅ Obunani tasdiqlash", callback_data="check_subscription"))
+    return builder.as_markup()
+    # ==========================================================================================
+# AVTOMATIK YO'NALTIRISH (Menu yoki Ro'yxatdan o'tish)
+# ==========================================================================================
+async def process_user_entry(message: Message, state: FSMContext, user_id: int, user_firstname: str):
+    DB.setup()
+    user = DB.run("SELECT * FROM users WHERE uid=?", (user_id,), fetch="one")
 
     if not user:
         await state.set_state(Form.reg)
         text = (
-            f"🎯 <b>LOGOS PLATINUM ACADEMY</b>\n"
-            f"{Assets.D_LINE}\n"
-            f"Assalomu alaykum, hurmatli foydalanuvchi!\n\n"
-            f"Ro‘yxatdan o‘tish uchun ism va familiyangizni kiriting:\n\n"
-            f"<i>Masalan: ALIYEV VALI</i>"
+            f"🌟 <b>LOGOS PLATINUM ACADEMY</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👋 Assalomu alaykum, <b>{html.escape(user_firstname)}</b>!\n"
+            f"Matematikadan sertifikat  botiga xush kelibsiz.\n\n"
+            f"✍️ <i>Iltimos, botdan to'liq foydalanish uchun ism va familiyangizni kiriting:</i>\n\n"
+            f"💡 <b>Namuna:</b> <i>Aliyev Vali</i>"
         )
-        return await message.answer(text, parse_mode="HTML")
+        await message.answer(text, parse_mode="HTML")
+    else:
+        dashboard = (
+            f"👑 <b>ASOSIY BOSHQARUV PANELI</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👤 Foydalanuvchi: <b>{html.escape(user['fullname'])}</b>\n"
+            f"🎖 Status: <b>Premium A'zo</b> 💎\n\n"
+            f"📅 Sana: <b>{datetime.now().strftime('%d.%m.%Y')}</b>\n"
+            f"🕒 Vaqt: <b>{datetime.now().strftime('%H:%M')}</b>\n\n"
+            f"👇 <i>Kerakli bo'limni tanlang:</i>"
+        )
+        await message.answer(dashboard, reply_markup=UI.main_menu(user_id), parse_mode="HTML")
 
-    dashboard = (
-        f"👑 <b>ASOSIY BOSHQARUV PANELI</b>\n"
-        f"{Assets.D_LINE}\n"
-        f"👤 Foydalanuvchi: <b>{escape(user['fullname'])}</b>\n"
-        f"🎖 Status: <b>Premium Foydalanuvchi</b>\n"
-        f"📅 Sana: <b>{datetime.now().strftime('%d.%m.%Y')}</b>\n"
-        f"🕒 Vaqt: <b>{datetime.now().strftime('%H:%M')}</b>\n"
-        f"{Assets.S_LINE}\n"
-        f"Tanlang 👇"
-    )
-    await message.answer(dashboard, reply_markup=UI.main_menu(message.from_user.id), parse_mode="HTML")
+# ==========================================================================================
+# START / RESET HANDLER
+# ==========================================================================================
+@dp.message(or_f(Command("start"), F.text == Assets.ICO_HOME, F.text == Assets.ICO_BACK))
+async def global_reset(message: Message, state: FSMContext, bot: Bot):
+    await state.clear()
 
+    # 1. Obunani tekshirish
+    subscribed = await is_subscribed(bot, message.from_user.id)
 
+    if not subscribed:
+        text = (
+            f"🛑 <b>DIQQAT! Botdan foydalanish uchun obuna bo'ling!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Bot xizmatlaridan foydalanish uchun quyidagi rasmiy kanallarimizga a'zo bo'lishingiz majburiy.\n\n"
+            f"<i>Obuna bo'lgach, pastdagi <b>«✅ Obunani tasdiqlash»</b> tugmasini bosing.</i>"
+        )
+        await message.answer(text, reply_markup=get_subscription_keyboard(), parse_mode="HTML")
+        return
+
+    # 2. Agar obuna bo'lgan bo'lsa, tizimga kiritish
+    await process_user_entry(message, state, message.from_user.id, message.from_user.first_name)
+
+# ==========================================================================================
+# TASDIQLASH TUGMASI UCHUN CALLBACK HANDLER
+# ==========================================================================================
+@dp.callback_query(F.data == "check_subscription")
+async def check_sub_handler(call: CallbackQuery, state: FSMContext, bot: Bot):
+    subscribed = await is_subscribed(bot, call.from_user.id)
+
+    if not subscribed:
+        await call.answer("❌ Siz barcha kanallarga obuna bo'lmadingiz! Iltimos, obuna bo'ling.", show_alert=True)
+        return
+
+    await call.message.delete() # Obuna so'ralgan eski xabarni o'chirib tashlaymiz
+    await process_user_entry(call.message, state, call.from_user.id, call.from_user.first_name)
+
+# ==========================================================================================
+# RO'YXATDAN O'TISHNI YAKUNLASH
+# ==========================================================================================
 @dp.message(Form.reg)
 async def registration_finish(message: Message, state: FSMContext):
+    # Ismni bazaga yozish
     DB.run(
         "INSERT OR REPLACE INTO users (uid, fullname, username, joined_at) VALUES (?,?,?,?)",
         (message.from_user.id, message.text, message.from_user.username, datetime.now().isoformat())
     )
+    
+    success_text = (
+        f"🎉 <b>Muvaffaqiyatli ro'yxatdan o'tdingiz!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Hurmatli <b>{html.escape(message.text)}</b>, tizimga xush kelibsiz! 🚀\n"
+        f"Endi testlar, kunlik vazifalar va AI xizmatlaridan to'liq foydalana olasiz.\n\n"
+        f"👇 <i>Quyidagi menyudan kerakli bo'limni tanlang:</i>"
+    )
+    
     await message.answer(
-        "🎉 <b>Muvaffaqiyatli ro'yxatdan o'tdingiz!</b>\n\n"
-        "Endi testlar, kunlik test va AI xizmatlaridan foydalana olasiz.",
+        success_text,
         parse_mode="HTML",
         reply_markup=UI.main_menu(message.from_user.id)
     )
     await state.clear()
-
 
 # ==========================================================================================
 # TESTLAR
