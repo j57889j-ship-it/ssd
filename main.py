@@ -270,7 +270,7 @@ def get_active_daily_test():
 # SOZLAMALAR: Majburiy kanallar ro'yxati (Bot bu kanallarda ADMIN bo'lishi shart!)
 # ==========================================================================================
 REQUIRED_CHANNELS = [
-    {"name": "📢 Asosiy Kanal", "id": "@matematika_999"},
+    {"name": "📢 Asosiy Kanal", "id": "@Alo_math"},
 ]
 
 async def is_subscribed(bot: Bot, user_id: int) -> bool:
