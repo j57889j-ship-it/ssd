@@ -4,6 +4,8 @@ import os
 import sqlite3
 import html
 import random
+import json
+from aiohttp import web
 from datetime import datetime
 from typing import Final, Any, Optional
 
@@ -495,7 +497,26 @@ async def test_logic(message: Message, state: FSMContext):
     )
     await message.answer(res_msg, reply_markup=UI.main_menu(message.from_user.id), parse_mode="HTML")
     await state.clear()
+async def handle_user_feedback(request):
+    """
+    Foydalanuvchilardan fikr-mulohazalarni qabul qilish uchun API endpoint.
+    """
+    try:
+        data = await request.json()
+        uid = data.get("uid")
+        feedback = data.get("comment")
+        
+        # Ma'lumotlarni bazaga saqlash logikasi
+        # DB.run("INSERT INTO feedback (uid, comment, timestamp) VALUES (?,?,?)", ...)
+        
+        return web.json_response({
+            "status": "success", 
+            "message": "Fikr-mulohazangiz qabul qilindi!"
+        }, headers={'Access-Control-Allow-Origin': '*'})
+    except Exception as e:
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
 
+# Ushbu funksiyani bot ilovangizdagi routerga qo'shishingiz mumkin.
 
 # ==========================================================================================
 # KUNLIK TEST
