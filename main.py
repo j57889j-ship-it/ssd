@@ -1242,6 +1242,7 @@ async def api_login(request):
                 return web.json_response({
                     "success": True, 
                     "name": user["fullname"], 
+                    "uid": user["uid"], # SHU QATOR QO'SHILDI
                     "role": "admin" if user["uid"] == Assets.ADMIN_ID else "user"
                 }, headers={'Access-Control-Allow-Origin': '*'})
                 
@@ -1268,6 +1269,8 @@ async def main():
     app.router.add_get("/", handle)
     app.router.add_options("/api/login", api_login)
     app.router.add_post("/api/login", api_login)
+    app.router.add_options("/api/save_result", api_save_result)
+    app.router.add_post("/api/save_result", api_save_result)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
@@ -1276,7 +1279,35 @@ async def main():
     await bot.set_my_commands([
         BotCommand(command="start", description="🏠 Asosiy menyu")
     ])
+    async def api_save_result(request):
+    # CORS muammosini oldini olish
+    if request.method == 'OPTIONS':
+        return web.Response(headers={
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        })
     
+    try:
+        data = await request.json()
+        uid = data.get("uid")
+        test_kod = data.get("test_kod")
+        ball = data.get("ball")
+        total = data.get("total")
+        
+        # Foizni hisoblash
+        perc = (ball / total) * 100 if total else 0
+        mistakes = "Veb-sayt orqali ishlangan"
+        
+        # Ma'lumotni bazadagi 'results' jadvaliga yozish
+        DB.run(
+            "INSERT INTO results (uid, kod, ball, total, perc, mistakes, timestamp) VALUES (?,?,?,?,?,?,?)",
+            (uid, test_kod, ball, total, perc, mistakes, datetime.now().isoformat())
+        )
+        
+        return web.json_response({"success": True}, headers={'Access-Control-Allow-Origin': '*'})
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=500, headers={'Access-Control-Allow-Origin': '*'})
     print("💎 LOGOS PLATINUM V4.8 IS RUNNING...")
     await dp.start_polling(bot)
 
