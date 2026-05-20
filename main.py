@@ -1279,7 +1279,7 @@ async def main():
     await bot.set_my_commands([
         BotCommand(command="start", description="🏠 Asosiy menyu")
     ])
-    async def api_save_result(request):
+async def api_save_result(request):
     # CORS muammosini oldini olish
     if request.method == 'OPTIONS':
         return web.Response(headers={
