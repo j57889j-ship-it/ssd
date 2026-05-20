@@ -1262,23 +1262,33 @@ async def handle(request):
     return web.Response(text="Bot is running!")
 
 async def main():
-    DB.setup()
-    
-    # Veb-serverni ishga tushirish (Render talabi)
-    app = web.Application()
-    app.router.add_get("/", handle)
-    app.router.add_options("/api/login", api_login)
-    app.router.add_post("/api/login", api_login)
-    app.router.add_options("/api/save_result", api_save_result)
-    app.router.add_post("/api/save_result", api_save_result)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
-    await site.start()
+    try:
+        DB.setup()
+        
+        # Veb-serverni ishga tushirish
+        app = web.Application()
+        app.router.add_get("/", handle)
+        app.router.add_options("/api/login", api_login)
+        app.router.add_post("/api/login", api_login)
+        app.router.add_options("/api/save_result", api_save_result)
+        app.router.add_post("/api/save_result", api_save_result)
+        
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
+        await site.start()
 
-    await bot.set_my_commands([
-        BotCommand(command="start", description="🏠 Asosiy menyu")
-    ])
+        # Bot buyruqlarini sozlash
+        await bot.set_my_commands([
+            BotCommand(command="start", description="🏠 Asosiy menyu")
+        ])
+        
+        # 🌟 JUDA MUHIM: Bot o'chib qolmasligi uchun uni doimiy yoqib qo'yamiz
+        await dp.start_polling(bot)
+        
+    finally:
+        # 🌟 Unclosed client session xatosini butunlay yo'qotish uchun:
+        await bot.session.close()
 async def api_save_result(request):
     # CORS muammosini oldini olish
     if request.method == 'OPTIONS':
