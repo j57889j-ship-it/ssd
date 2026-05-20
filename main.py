@@ -4,8 +4,6 @@ import os
 import sqlite3
 import html
 import random
-import json
-from aiohttp import web
 from datetime import datetime
 from typing import Final, Any, Optional
 
@@ -38,7 +36,6 @@ class Assets:
     # Qiymatlarni environment variable'dan olish
     TOKEN: Final[str] = os.getenv("BOT_TOKEN", "")
     GROQ_KEY: Final[str] = os.getenv("GROQ_API_KEY", "")
-    # ADMIN_ID doim int (son) bo'lishi kerak, shuning uchun int() ga o'raymiz
     ADMIN_ID: Final[int] = int(os.getenv("ADMIN_ID", "0") or "0")
     DB_NAME: Final[str] = os.getenv("DB_NAME", "database.db")
 
@@ -79,7 +76,7 @@ groq_client = Groq(api_key=Assets.GROQ_KEY) if Groq and Assets.GROQ_KEY else Non
 
 
 # ==========================================================================================
-# 🗄 DATABASE
+# 🗄 DATABASE ENGINE (MUKAMMALLASHTIRILGAN BAZA)
 # ==========================================================================================
 class DB:
     @staticmethod
@@ -207,11 +204,10 @@ class UI:
         b.row(KeyboardButton(text=Assets.ICO_TEST), KeyboardButton(text=Assets.ICO_CHECK))
         b.row(KeyboardButton(text=Assets.ICO_DAILY), KeyboardButton(text=Assets.ICO_AI))
         b.row(KeyboardButton(text=Assets.ICO_HIS), KeyboardButton(text=Assets.ICO_PROF))
-        # Bu yerga ICO_WEB qo'shildi:
         b.row(KeyboardButton(text=Assets.ICO_HELP), KeyboardButton(text=Assets.ICO_WEB))
         if user_id == Assets.ADMIN_ID:
             b.row(KeyboardButton(text=Assets.ICO_ADM))
-        b.adjust(2, 2, 2, 2) # Tugmalar tartibi buzilmasligi uchun (2, 2, 2, 2) qilindi
+        b.adjust(2, 2, 2, 2)
         return b.as_markup(resize_keyboard=True)
         
     @staticmethod
@@ -269,38 +265,33 @@ def get_active_daily_test():
 
 
 # ==========================================================================================
-# SOZLAMALAR: Majburiy kanallar ro'yxati (Bot bu kanallarda ADMIN bo'lishi shart!)
+# MAJBURIY OBUNA KANALLARI SOZLAMASI
 # ==========================================================================================
 REQUIRED_CHANNELS = [
     {"name": "📢 Asosiy Kanal", "id": "@Alo_math"},
 ]
 
 async def is_subscribed(bot: Bot, user_id: int) -> bool:
-    """Foydalanuvchi barcha majburiy kanallarga obuna bo'lganligini tekshirish"""
     for channel in REQUIRED_CHANNELS:
         try:
             member = await bot.get_chat_member(chat_id=channel["id"], user_id=user_id)
             if member.status in ['left', 'kicked', 'banned']:
                 return False
         except Exception:
-            # Agar bot kanalda admin bo'lmasa yoki kanal topilmasa xato bermasligi uchun
             return False 
     return True
 
 def get_subscription_keyboard():
-    """Majburiy obuna tugmalarini yasash"""
     builder = InlineKeyboardBuilder()
     for channel in REQUIRED_CHANNELS:
-        # ID orqali kanal ssilkasi yaratiladi
         url = f"https://t.me/{channel['id'].replace('@', '')}"
         builder.row(InlineKeyboardButton(text=channel["name"], url=url))
     
-    # Tasdiqlash tugmasi
     builder.row(InlineKeyboardButton(text="✅ Obunani tasdiqlash", callback_data="check_subscription"))
     return builder.as_markup()
 
 # ==========================================================================================
-# AVTOMATIK YO'NALTIRISH (Menu yoki Ro'yxatdan o'tish)
+# AVTOMATIK YO'NALTIRISH
 # ==========================================================================================
 async def process_user_entry(message: Message, state: FSMContext, user_id: int, user_firstname: str):
     DB.setup()
@@ -309,21 +300,21 @@ async def process_user_entry(message: Message, state: FSMContext, user_id: int, 
     if not user:
         await state.set_state(Form.reg)
         text = (
-            f"🌟 <b>LOGOS PLATINUM ACADEMY</b>\n"
+            f"🌟 <b>A'LO TA'LIM PLATFORMASI</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"👋 Assalomu alaykum, <b>{html.escape(user_firstname)}</b>!\n"
-            f"Matematikadan sertifikat botiga xush kelibsiz.\n\n"
-            f"✍️ <i>Iltimos, botdan to'liq foydalanish uchun ism va familiyangizni kiriting:</i>\n\n"
-            f"💡 <b>Namuna:</b> <i>Aliyev Vali</i>"
+            f"Onlayn test va tahlil tizimiga xush kelibsiz.\n\n"
+            f"✍️ <i>Tizimdan foydalanish uchun ism va familiyangizni to'liq yuboring:</i>\n\n"
+            f"💡 <b>Namuna:</b> <i>Abdurahmon Alimov</i>"
         )
         await message.answer(text, parse_mode="HTML")
     else:
         dashboard = (
-            f"👑 <b>ASOSIY BOSHQARUV PANELI</b>\n"
+            f"👑 <b>ASOSIY TIZIM PANELI</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"👤 Foydalanuvchi: <b>{html.escape(user['fullname'])}</b>\n"
             f"🎖 Status: <b>Premium A'zo</b> 💎\n\n"
-            f"📅 Sana: <b>{datetime.now().strftime('%d.%m.%Y')}</b>\n"
+            f"📅 Bugun: <b>{datetime.now().strftime('%d.%m.%Y')}</b>\n"
             f"🕒 Vaqt: <b>{datetime.now().strftime('%H:%M')}</b>\n\n"
             f"👇 <i>Kerakli bo'limni tanlang:</i>"
         )
@@ -335,21 +326,18 @@ async def process_user_entry(message: Message, state: FSMContext, user_id: int, 
 @dp.message(or_f(Command("start"), F.text == Assets.ICO_HOME, F.text == Assets.ICO_BACK))
 async def global_reset(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
-
-    # 1. Obunani tekshirish
     subscribed = await is_subscribed(bot, message.from_user.id)
 
     if not subscribed:
         text = (
             f"🛑 <b>DIQQAT! Botdan foydalanish uchun obuna bo'ling!</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"Bot xizmatlaridan foydalanish uchun quyidagi rasmiy kanallarimizga a'zo bo'lishingiz majburiy.\n\n"
+            f"Bizning premium test xizmatlaridan foydalanish uchun rasmiy kanalimizga a'zo bo'lishingiz majburiy.\n\n"
             f"<i>Obuna bo'lgach, pastdagi <b>«✅ Obunani tasdiqlash»</b> tugmasini bosing.</i>"
         )
         await message.answer(text, reply_markup=get_subscription_keyboard(), parse_mode="HTML")
         return
 
-    # 2. Agar obuna bo'lgan bo'lsa, tizimga kiritish
     await process_user_entry(message, state, message.from_user.id, message.from_user.first_name)
 
 # ==========================================================================================
@@ -360,10 +348,10 @@ async def check_sub_handler(call: CallbackQuery, state: FSMContext, bot: Bot):
     subscribed = await is_subscribed(bot, call.from_user.id)
 
     if not subscribed:
-        await call.answer("❌ Siz barcha kanallarga obuna bo'lmadingiz! Iltimos, obuna bo'ling.", show_alert=True)
+        await call.answer("❌ Siz hali obuna bo'lmadingiz! Iltimos, kanalimizga a'zo bo'ling.", show_alert=True)
         return
 
-    await call.message.delete() # Obuna so'ralgan eski xabarni o'chirib tashlaymiz
+    await call.message.delete()
     await process_user_entry(call.message, state, call.from_user.id, call.from_user.first_name)
 
 # ==========================================================================================
@@ -371,7 +359,6 @@ async def check_sub_handler(call: CallbackQuery, state: FSMContext, bot: Bot):
 # ==========================================================================================
 @dp.message(Form.reg)
 async def registration_finish(message: Message, state: FSMContext):
-    # Ismni bazaga yozish
     DB.run(
         "INSERT OR REPLACE INTO users (uid, fullname, username, joined_at) VALUES (?,?,?,?)",
         (message.from_user.id, message.text, message.from_user.username, datetime.now().isoformat())
@@ -381,7 +368,7 @@ async def registration_finish(message: Message, state: FSMContext):
         f"🎉 <b>Muvaffaqiyatli ro'yxatdan o'tdingiz!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"Hurmatli <b>{html.escape(message.text)}</b>, tizimga xush kelibsiz! 🚀\n"
-        f"Endi testlar, kunlik vazifalar va AI xizmatlaridan to'liq foydalana olasiz.\n\n"
+        f"Endi platforma va bot xizmatlaridan to'liq foydalana olasiz.\n\n"
         f"👇 <i>Quyidagi menyudan kerakli bo'limni tanlang:</i>"
     )
     
@@ -393,22 +380,22 @@ async def registration_finish(message: Message, state: FSMContext):
     await state.clear()
 
 # ==========================================================================================
-# TESTLAR
+# TESTLAR MARKAZI
 # ==========================================================================================
 @dp.message(F.text == Assets.ICO_TEST)
 async def test_list(message: Message):
     tests = DB.run("SELECT * FROM tests ORDER BY created_at DESC", fetch="all")
     if not tests:
-        return await message.answer("📭 <b>Hozircha testlar bazasi bo'sh.</b>", parse_mode="HTML")
+        return await message.answer("📭 <b>Hozircha testlar mavjud emas.</b>", parse_mode="HTML")
 
-    res_text = f"📂 <b>MAVJUD TESTLAR ARXIVI</b>\n{Assets.D_LINE}\n"
+    res_text = f"📂 <b>MAVJUD ONLAYN TESTLAR RO'YXATI</b>\n{Assets.D_LINE}\n"
     for t in tests:
         res_text += (
             f"📙 <b>{html.escape(t['title'])}</b>\n"
             f"└ 🔑 Kod: <code>{html.escape(t['kod'])}</code> | 🕒 {fmt_dt(t['created_at'])}\n"
             f"{Assets.S_LINE}\n"
         )
-    res_text += "<i>💡 Test topshirish uchun 'Testni Tekshirish' bo'limiga o'ting.</i>"
+    res_text += "<i>💡 Test topshirish uchun '📝 Test Topshirish' bo'limiga o'ting yoki Veb-saytdan foydalaning.</i>"
     await message.answer(res_text, parse_mode="HTML")
 
 
@@ -418,7 +405,7 @@ async def check_init(message: Message, state: FSMContext):
     await message.answer(
         "🆔 <b>TEST KODINI KIRITING</b>\n"
         f"{Assets.S_LINE}\n"
-        "Iltimos, kerakli testning kodini yuboring:",
+        "Iltimos, topshirmoqchi bo'lgan test kodini yuboring:",
         reply_markup=UI.back_btn(),
         parse_mode="HTML"
     )
@@ -437,7 +424,7 @@ async def check_process(message: Message, state: FSMContext):
         f"📝 <b>TEST MA'LUMOTLARI</b>\n"
         f"{Assets.D_LINE}\n"
         f"📖 Fan: <b>{html.escape(test['title'])}</b>\n"
-        f"🔢 Javoblar soni: <b>{len(normalize_answers(test['javoblar']))} ta</b>\n"
+        f"🔢 Savollar soni: <b>{len(normalize_answers(test['javoblar']))} ta</b>\n"
         f"🔑 Kod: <code>{html.escape(test['kod'])}</code>\n"
         f"{Assets.S_LINE}\n"
         f"📥 <b>Javoblaringizni yuboring:</b>\n"
@@ -497,26 +484,7 @@ async def test_logic(message: Message, state: FSMContext):
     )
     await message.answer(res_msg, reply_markup=UI.main_menu(message.from_user.id), parse_mode="HTML")
     await state.clear()
-async def handle_user_feedback(request):
-    """
-    Foydalanuvchilardan fikr-mulohazalarni qabul qilish uchun API endpoint.
-    """
-    try:
-        data = await request.json()
-        uid = data.get("uid")
-        feedback = data.get("comment")
-        
-        # Ma'lumotlarni bazaga saqlash logikasi
-        # DB.run("INSERT INTO feedback (uid, comment, timestamp) VALUES (?,?,?)", ...)
-        
-        return web.json_response({
-            "status": "success", 
-            "message": "Fikr-mulohazangiz qabul qilindi!"
-        }, headers={'Access-Control-Allow-Origin': '*'})
-    except Exception as e:
-        return web.json_response({"status": "error", "message": str(e)}, status=500)
 
-# Ushbu funksiyani bot ilovangizdagi routerga qo'shishingiz mumkin.
 
 # ==========================================================================================
 # KUNLIK TEST
@@ -527,7 +495,7 @@ async def daily_test_start(message: Message, state: FSMContext):
     if not test:
         return await message.answer(
             "📭 <b>Hozircha kunlik test qo'shilmagan.</b>\n"
-            "Admin yangi test qo'shganda bu yerda ko'rinadi.",
+            "Yaqinda yangi test yuklanadi.",
             parse_mode="HTML"
         )
 
@@ -535,13 +503,13 @@ async def daily_test_start(message: Message, state: FSMContext):
     await state.set_state(Form.daily_solve_ans)
 
     info = (
-        f"🌟 <b>KUNLIK TEST</b>\n"
+        f"🌟 <b>BUGUNGI KUNLIK TEST</b>\n"
         f"{Assets.D_LINE}\n"
         f"📖 Test nomi: <b>{html.escape(test['title'])}</b>\n"
-        f"🔢 Javoblar soni: <b>{len(normalize_answers(test['javoblar']))} ta</b>\n"
-        f"🕒 Yangilangan: <b>{fmt_dt(test['created_at'])}</b>\n"
+        f"🔢 Savollar soni: <b>{len(normalize_answers(test['javoblar']))} ta</b>\n"
+        f"🕒 Sana: <b>{fmt_dt(test['created_at'])}</b>\n"
         f"{Assets.S_LINE}\n"
-        f"📥 <b>Javoblaringizni hozir shu joyda yuboring:</b>\n"
+        f"📥 <b>Javoblaringizni yuboring:</b>\n"
         f"Format: <code>abcd...</code>"
     )
 
@@ -597,24 +565,24 @@ async def daily_test_logic(message: Message, state: FSMContext):
         f"{Assets.progress_bar(perc)}\n\n"
         f"❌ Xatolar: <code>{html.escape(', '.join(mistakes) if mistakes else 'MUKAMMAL!')}</code>\n"
         f"{Assets.S_LINE}\n"
-        f"📅 Bu natija kunlik statistikaga qo'shildi."
+        f"📅 Kunlik statistika ro'yxatiga qo'shildi."
     )
     await message.answer(res_msg, reply_markup=UI.main_menu(message.from_user.id), parse_mode="HTML")
     await state.clear()
 
 
 # ==========================================================================================
-# SUPPORT
+# BOG'LANISH VA QO'LLAB-QUVVATLASH
 # ==========================================================================================
 @dp.message(F.text == Assets.ICO_HELP)
 async def support_start(message: Message, state: FSMContext):
     await state.set_state(Form.support)
     await message.answer(
         f"<b>{Assets.S_LINE}</b>\n"
-        f"📬 <b>ADMINISTRATSIYA BILAN ALOQA</b>\n"
+        f"📬 <b>ADMINISTRATOR BILAN ALOQA</b>\n"
         f"<b>{Assets.S_LINE}</b>\n\n"
-        f"Savolingiz, taklifingiz yoki shikoyatingizni yozib qoldiring.\n\n"
-        f"<i>Xabar matnini kiriting:</i>",
+        f"Murojaatingiz, shikoyatingiz yoki savollaringizni qoldiring.\n\n"
+        f"<i>Matnni kiriting:</i>",
         reply_markup=UI.back_btn(),
         parse_mode="HTML"
     )
@@ -642,7 +610,7 @@ async def support_sent(message: Message, state: FSMContext):
     )
 
     await message.answer(
-        "✅ <b>Xabaringiz adminga yetkazildi!</b>\nJavobni kuting.",
+        "✅ <b>Xabaringiz adminga yetkazildi!</b>\nTez orada javob olasiz.",
         reply_markup=UI.main_menu(message.from_user.id),
         parse_mode="HTML"
     )
@@ -679,31 +647,30 @@ async def admin_reply_sent(message: Message, state: FSMContext):
     try:
         await bot.send_message(
             int(target_id),
-            f"📩 <b>ADMINISTRATSIYA JAVOBI</b>\n"
+            f"📩 <b>MA'MURIYAT JAVOBI:</b>\n"
             f"<b>{Assets.D_LINE}</b>\n"
             f"{html.escape(reply_text)}\n"
-            f"<b>{Assets.D_LINE}</b>\n"
-            f"<i>Savollaringiz bo'lsa, yana murojaat qilishingiz mumkin.</i>",
+            f"<b>{Assets.D_LINE}</b>",
             parse_mode="HTML"
         )
         await message.answer("✅ Javob yuborildi.", reply_markup=UI.admin_menu(), parse_mode="HTML")
     except Exception as e:
-        await message.answer(f"❌ Xatolik: foydalanuvchiga yuborib bo'lmadi.\n<code>{html.escape(str(e))}</code>", parse_mode="HTML")
+        await message.answer(f"❌ Xato, yuborish imkoni bo'lmadi:\n<code>{html.escape(str(e))}</code>", parse_mode="HTML")
 
     await state.clear()
 
 
 # ==========================================================================================
-# AI
+# AI MENTOR
 # ==========================================================================================
 @dp.message(F.text == Assets.ICO_AI)
 async def ai_init(message: Message, state: FSMContext):
     await state.set_state(Form.ai_chat)
     await message.answer(
-        f"🧠 <b>LOGOS AI MENTOR</b>\n"
+        f"🧠 <b>A'LO TA'LIM AI MENTOR</b>\n"
         f"{Assets.S_LINE}\n"
-        "Men sizga istalgan fanda yordam bera olaman.\n"
-        "Savolingizni batafsil yozing:",
+        "Istalgan fanda savollaringizni yo'llang. Sizga optimal javob beraman:\n"
+        "Savolingizni kiriting:",
         reply_markup=UI.back_btn(),
         parse_mode="HTML"
     )
@@ -714,24 +681,24 @@ async def ai_logic(message: Message):
     if message.text == Assets.ICO_BACK:
         return
 
-    loading = await message.answer("🔄 <i>Sun'iy intellekt tahlil qilmoqda...</i>")
+    loading = await message.answer("🔄 <i>Neyrotarmoq hisoblamoqda...</i>")
     try:
         if not groq_client:
-            await loading.edit_text("⚠️ <b>AI sozlanmagan.</b> GROQ_KEY topilmadi.", parse_mode="HTML")
+            await loading.edit_text("⚠️ <b>AI mentor faollashtirilmagan.</b> API kaliti mavjud emas.", parse_mode="HTML")
             return
 
         resp = groq_client.chat.completions.create(
             messages=[
                 {
                     "role": "system",
-                    "content": "Siz aqlli ta'lim mentorisiz. Savollarga faqat O'zbek tilida, aniq va tushunarli javob bering."
+                    "content": "Siz A'lo Ta'lim intellektual mentorisiz. Savollarga o'zbek tilida, aniq va chuqur tushuntirib javob bering."
                 },
                 {"role": "user", "content": message.text}
             ],
             model="llama-3.3-70b-versatile"
         )
         ai_reply = (
-            f"🎓 <b>USTOZ JAVOBI:</b>\n"
+            f"🎓 <b>AI MENTOR JAVOBI:</b>\n"
             f"{Assets.D_LINE}\n"
             f"{html.escape(resp.choices[0].message.content)}\n"
             f"{Assets.S_LINE}\n"
@@ -739,26 +706,26 @@ async def ai_logic(message: Message):
         )
         await loading.edit_text(ai_reply, parse_mode="HTML")
     except Exception:
-        await loading.edit_text("⚠️ <b>Texnik nosozlik!</b> AI bilan bog'lanishda xatolik yuz berdi.", parse_mode="HTML")
+        await loading.edit_text("⚠️ <b>Ulanish xatosi!</b> Tarmoqda nosozlik yuz berdi.", parse_mode="HTML")
 
 
 # ==========================================================================================
-# PROFIL / TARIX
+# SHAXSIY KABINET & TARIX
 # ==========================================================================================
 @dp.message(F.text == Assets.ICO_PROF)
 async def profile(message: Message):
     u = DB.run("SELECT * FROM users WHERE uid=?", (message.from_user.id,), fetch="one")
     if not u:
-        return await message.answer("⚠️ Profil topilmadi. /start yuboring.", parse_mode="HTML")
+        return await message.answer("⚠️ Profil ma'lumoti topilmadi. /start buyrug'ini bering.", parse_mode="HTML")
 
     p_text = (
-        f"💎 <b>SHAXSIY PROFIL</b>\n"
+        f"💎 <b>SHAXSIY KABINET</b>\n"
         f"{Assets.D_LINE}\n"
         f"👤 Ism: <b>{html.escape(u['fullname'])}</b>\n"
         f"🆔 ID: <code>{u['uid']}</code>\n"
-        f"📅 Ro'yxatdan o'tdi: <b>{fmt_dt(u['joined_at'])}</b>\n"
+        f"📅 A'zolik sanasi: <b>{fmt_dt(u['joined_at'])}</b>\n"
         f"{Assets.S_LINE}\n"
-        f"Barcha natijalaringiz ma'lumotlar bazasida xavfsiz saqlanadi."
+        f"Veb-saytga kirishda ham o'zingizning maxsus kodingizdan foydalanasiz."
     )
     await message.answer(p_text, parse_mode="HTML")
 
@@ -771,9 +738,9 @@ async def history(message: Message):
         fetch="all"
     )
     if not res:
-        return await message.answer("<b>Sizda hali natijalar mavjud emas.</b>", parse_mode="HTML")
+        return await message.answer("<b>Sizda hali natijalar ro'yxati shakllanmagan.</b>", parse_mode="HTML")
 
-    msg = f"📊 <b>OXIRGI 10 TA NATIJA</b>\n{Assets.D_LINE}\n"
+    msg = f"📊 <b>OXIRGI 10 TA NATIJA (Sinxronlanganlar bilan)</b>\n{Assets.D_LINE}\n"
     for r in res:
         msg += (
             f"📎 <b>Kod: {html.escape(r['kod'])}</b> | "
@@ -784,7 +751,7 @@ async def history(message: Message):
 
 
 # ==========================================================================================
-# ADMIN PANEL
+# ADMINISTRATOR BOSHQARUVI
 # ==========================================================================================
 @dp.message(F.text == Assets.ICO_ADM)
 async def admin_portal(message: Message):
@@ -796,19 +763,19 @@ async def admin_portal(message: Message):
         f"📅 <b>Kunlik test:</b> {html.escape(daily['title'])} | "
         f"<code>{html.escape(daily['kod'])}</code>\n"
         if daily else
-        "📅 <b>Kunlik test:</b> hali yo'q\n"
+        "📅 <b>Kunlik test:</b> mavjud emas\n"
     )
 
-    status_bar = "🟢 SYSTEM ONLINE | v4.8 Platinum"
+    status_bar = "🟢 SYSTEM FAOL | Elite Sync v4.9"
     await message.answer(
         f"<b>{Assets.D_LINE}</b>\n"
-        f"⚡️ <b>ADMINISTRATOR DASHBOARD</b>\n"
+        f"⚡️ <b>ADMIN DASHBOARD</b>\n"
         f"<b>{Assets.D_LINE}</b>\n\n"
         f"👤 Profil: <b>{html.escape(message.from_user.full_name)}</b>\n"
         f"📊 Holat: <code>{html.escape(status_bar)}</code>\n"
         f"🕒 Vaqt: <code>{datetime.now().strftime('%H:%M:%S')}</code>\n"
         f"{daily_info}\n"
-        f"<i>Boshqarish uchun quyidagi menyuni ishlating:</i>",
+        f"<i>Boshqarish menyusi faollashtirildi 👇</i>",
         reply_markup=UI.admin_menu(),
         parse_mode="HTML"
     )
@@ -821,10 +788,10 @@ async def adm_add_start(message: Message, state: FSMContext):
     await state.set_state(Form.adm_add_kod)
     await message.answer(
         f"<b>{Assets.S_LINE}</b>\n"
-        f"🧩 <b>YANGI TEST YARATISH</b>\n"
+        f"🧩 <b>YANGI TEST QO'SHISH</b>\n"
         f"<b>{Assets.S_LINE}</b>\n\n"
-        f"<b>1️⃣ QADAM:</b> Test uchun <b>ID KOD</b> kiriting.\n"
-        f"<i>Masalan: <code>2024</code></i>",
+        f"<b>1-QADAM:</b> Test uchun <b>ID KOD</b> kiriting.\n"
+        f"<i>Masalan: <code>M-101</code></i>",
         reply_markup=UI.back_btn(),
         parse_mode="HTML"
     )
@@ -836,11 +803,11 @@ async def adm_add_k(message: Message, state: FSMContext):
         return
     check = DB.run("SELECT kod FROM tests WHERE kod=?", (message.text.strip(),), fetch="one")
     if check:
-        return await message.answer("❌ <b>Xatolik:</b> Ushbu kod band! Boshqa ID tanlang.", parse_mode="HTML")
+        return await message.answer("❌ <b>Ushbu test kodi band!</b> Boshqa kod yuboring.", parse_mode="HTML")
 
     await state.update_data(kod=message.text.strip())
     await state.set_state(Form.adm_add_title)
-    await message.answer("<b>2️⃣ QADAM:</b> Fan yoki test sarlavhasini kiriting:", parse_mode="HTML")
+    await message.answer("<b>2-QADAM:</b> Fan yoki test sarlavhasini kiriting:", parse_mode="HTML")
 
 
 @dp.message(Form.adm_add_title)
@@ -850,7 +817,7 @@ async def adm_add_t(message: Message, state: FSMContext):
     await state.update_data(title=message.text.strip())
     await state.set_state(Form.adm_add_ans)
     await message.answer(
-        "<b>3️⃣ QADAM:</b> To'g'ri javoblarni yuboring:\n"
+        "<b>3-QADAM:</b> To'g'ri javoblarni ketma-ketlikda yuboring:\n"
         "📥 <i>Namuna: <code>abcd...</code></i>",
         parse_mode="HTML"
     )
@@ -862,13 +829,13 @@ async def adm_add_a(message: Message, state: FSMContext):
         return
     ans = normalize_answers(message.text)
     if not ans:
-        return await message.answer("⚠️ Javoblar bo'sh bo'lmasin.", parse_mode="HTML")
+        return await message.answer("⚠️ Javoblar bo'sh bo'lishi mumkin emas.", parse_mode="HTML")
 
     await state.update_data(ans=ans)
     await state.set_state(Form.adm_add_file)
     await message.answer(
-        "<b>4️⃣ QADAM:</b> Test faylini biriktiring (ixtiyoriy):\n"
-        "➡️ <i>Faylsiz davom etish: /skip</i>",
+        "<b>4-QADAM:</b> Test PDF faylini biriktiring (ixtiyoriy):\n"
+        "➡️ <i>O'tkazib yuborish: /skip</i>",
         parse_mode="HTML"
     )
 
@@ -882,7 +849,7 @@ async def adm_add_f(message: Message, state: FSMContext):
     fid = message.document.file_id if message.document else None
 
     if not message.document and (message.text or "").strip() != "/skip":
-        return await message.answer("⚠️ Iltimos, fayl yuboring yoki /skip buyrug'ini bering.", parse_mode="HTML")
+        return await message.answer("⚠️ Iltimos, fayl yuklang yoki /skip buyrug'ini yuboring.", parse_mode="HTML")
 
     DB.run(
         "INSERT INTO tests (kod, javoblar, file_id, title, created_at) VALUES (?,?,?,?,?)",
@@ -890,7 +857,7 @@ async def adm_add_f(message: Message, state: FSMContext):
     )
 
     await message.answer(
-        f"✨ <b>TEST MUVAFFAQIYATLI YARATILDI!</b>\n"
+        f"✨ <b>TEST MUVAFFAQIYATLI QO'SHILDI!</b>\n"
         f"<b>{Assets.D_LINE}</b>\n"
         f"📂 Fan: <b>{html.escape(data['title'])}</b>\n"
         f"🔑 Kod: <code>{html.escape(data['kod'])}</code>\n"
@@ -911,8 +878,8 @@ async def adm_add_daily_start(message: Message, state: FSMContext):
         f"<b>{Assets.S_LINE}</b>\n"
         f"🌟 <b>KUNLIK TEST QO'SHISH</b>\n"
         f"<b>{Assets.S_LINE}</b>\n\n"
-        f"<b>1️⃣ QADAM:</b> Kunlik test uchun <b>ID KOD</b> kiriting.\n"
-        f"<i>Masalan: <code>daily-001</code></i>",
+        f"<b>1-QADAM:</b> Kunlik test uchun <b>ID KOD</b> yuboring.\n"
+        f"<i>Masalan: <code>daily-101</code></i>",
         reply_markup=UI.back_btn(),
         parse_mode="HTML"
     )
@@ -922,21 +889,19 @@ async def adm_add_daily_start(message: Message, state: FSMContext):
 async def adm_add_daily_k(message: Message, state: FSMContext):
     if message.from_user.id != Assets.ADMIN_ID:
         return
-
     await state.update_data(daily_kod=message.text.strip())
     await state.set_state(Form.adm_add_daily_title)
-    await message.answer("<b>2️⃣ QADAM:</b> Kunlik test sarlavhasini kiriting:", parse_mode="HTML")
+    await message.answer("<b>2-QADAM:</b> Kunlik test sarlavhasini kiriting:", parse_mode="HTML")
 
 
 @dp.message(Form.adm_add_daily_title)
 async def adm_add_daily_t(message: Message, state: FSMContext):
     if message.from_user.id != Assets.ADMIN_ID:
         return
-
     await state.update_data(daily_title=message.text.strip())
     await state.set_state(Form.adm_add_daily_ans)
     await message.answer(
-        "<b>3️⃣ QADAM:</b> To'g'ri javoblarni kiriting:\n"
+        "<b>3-QADAM:</b> To'g'ri javoblarni yuboring:\n"
         "📥 <i>Namuna: <code>abcd...</code></i>",
         parse_mode="HTML"
     )
@@ -946,16 +911,15 @@ async def adm_add_daily_t(message: Message, state: FSMContext):
 async def adm_add_daily_a(message: Message, state: FSMContext):
     if message.from_user.id != Assets.ADMIN_ID:
         return
-
     ans = normalize_answers(message.text)
     if not ans:
-        return await message.answer("⚠️ Javoblar bo'sh bo'lmasin.", parse_mode="HTML")
+        return await message.answer("⚠️ Javoblar bo'sh bo'lishi mumkin emas.", parse_mode="HTML")
 
     await state.update_data(daily_ans=ans)
     await state.set_state(Form.adm_add_daily_file)
     await message.answer(
-        "<b>4️⃣ QADAM:</b> Kunlik test faylini biriktiring (ixtiyoriy):\n"
-        "➡️ <i>Faylsiz davom etish: /skip</i>",
+        "<b>4-QADAM:</b> Kunlik test faylini biriktiring (ixtiyoriy):\n"
+        "➡️ <i>O'tkazib yuborish: /skip</i>",
         parse_mode="HTML"
     )
 
@@ -969,9 +933,8 @@ async def adm_add_daily_f(message: Message, state: FSMContext):
     fid = message.document.file_id if message.document else None
 
     if not message.document and (message.text or "").strip() != "/skip":
-        return await message.answer("⚠️ Iltimos, fayl yuboring yoki /skip buyrug'ini bering.", parse_mode="HTML")
+        return await message.answer("⚠️ Fayl yuboring yoki /skip deb yozing.", parse_mode="HTML")
 
-    # YANGI KUNLIK TEST QO'SHILSA: eski kunlik statistika O'CHADI
     DB.clear_daily_stats()
 
     DB.run(
@@ -985,7 +948,7 @@ async def adm_add_daily_f(message: Message, state: FSMContext):
         f"📂 Sarlavha: <b>{html.escape(data['daily_title'])}</b>\n"
         f"🔑 Kod: <code>{html.escape(data['daily_kod'])}</code>\n"
         f"✅ Savollar: <b>{len(data['daily_ans'])} ta</b>\n"
-        f"🧹 Eski kunlik statistika avtomatik tozalandi.\n"
+        f"🧹 Eski kunlik natijalar tozalandi.\n"
         f"{Assets.D_LINE}",
         reply_markup=UI.admin_menu(),
         parse_mode="HTML"
@@ -1011,9 +974,9 @@ async def adm_del_list(message: Message):
 
     await message.answer(
         f"<b>{Assets.S_LINE}</b>\n"
-        f"⚠️ <b>TESTLARNI O'CHIRISH PANELI</b>\n"
+        f"⚠️ <b>TEST O'CHIRISH BO'LIMI</b>\n"
         f"<b>{Assets.S_LINE}</b>\n"
-        f"O'chirmoqchi bo'lgan testingizni tanlang 👇",
+        f"O'chirmoqchi bo'lgan testni tanlang 👇",
         reply_markup=kb.as_markup(),
         parse_mode="HTML"
     )
@@ -1032,8 +995,8 @@ async def pre_del(call: CallbackQuery):
     )
     await call.message.edit_text(
         f"🛑 <b>DIQQAT!</b>\n\n"
-        f"Siz <b>{kod}</b> kodli testni butunlay o'chirib yubormoqchisiz.\n"
-        f"Unga tegishli barcha natijalar o'chib ketadi!",
+        f"Siz <b>{kod}</b> kodli testni va unga tegishli barcha natijalarni bazadan o'chirmoqchisiz.\n"
+        f"Davom etasizmi?",
         reply_markup=kb.as_markup(),
         parse_mode="HTML"
     )
@@ -1046,24 +1009,22 @@ async def confirm_del(call: CallbackQuery):
     kod = call.data.split("_", 2)[2]
     DB.run("DELETE FROM tests WHERE kod=?", (kod,))
     DB.run("DELETE FROM results WHERE kod=?", (kod,))
-    await call.answer("Test o'chirildi!", show_alert=True)
-    await call.message.edit_text(f"🏁 <b>{kod}</b> kodli test tizimdan o'chirildi.")
+    await call.answer("O'chirildi!", show_alert=True)
+    await call.message.edit_text(f"🏁 <b>{kod}</b> kodli test o'chirib yuborildi.")
 
-# ==========================================================================================
-# BATAFSIL STATISTIKA
-# ==========================================================================================
+
 async def show_general_stats(message_or_call):
     tests = DB.run("SELECT kod, title FROM tests ORDER BY created_at DESC", fetch="all")
     u_count = DB.run("SELECT COUNT(*) as c FROM users", fetch="one")["c"]
     r_count = DB.run("SELECT COUNT(*) as c FROM results", fetch="one")["c"]
 
     res_text = (
-        f"📊 <b>UMUMIY TIZIM STATISTIKASI</b>\n"
+        f"📊 <b>PLATFORMA STATISTIKASI</b>\n"
         f"{Assets.D_LINE}\n"
         f"👥 Foydalanuvchilar: <b>{u_count} ta</b>\n"
-        f"📝 Tizimdagi testlar topshirildi: <b>{r_count} marta</b>\n"
+        f"📝 Umumiy test topshirishlar: <b>{r_count} marta</b>\n"
         f"{Assets.S_LINE}\n"
-        f"<i>Batafsil ma'lumot olish uchun quyidagi testlardan birini tanlang:</i>"
+        f"<i>Batafsil ma'lumot uchun testni tanlang:</i>"
     )
     
     kb = InlineKeyboardBuilder()
@@ -1085,7 +1046,6 @@ async def detailed_test_stats(call: CallbackQuery):
     if call.from_user.id != Assets.ADMIN_ID: return
     kod = call.data.split("_", 1)[1]
     
-    # Ma'lumotlarni yig'ish (Kim qancha ishlagan, eng baland balli)
     results = DB.run("""
         SELECT u.fullname, COUNT(r.rid) as tries, MAX(r.ball) as m_ball, MAX(r.total) as total, MAX(r.perc) as m_perc 
         FROM results r JOIN users u ON r.uid = u.uid 
@@ -1098,23 +1058,22 @@ async def detailed_test_stats(call: CallbackQuery):
     t_name = test['title'] if test else "Noma'lum"
 
     if not results:
-        await call.answer("Bu testni hali hech kim ishlamagan!", show_alert=True)
+        await call.answer("Ushbu test hali yechilmagan!", show_alert=True)
         return
 
     text = (
-        f"📈 <b>TEST STATISTIKASI: BATAFSIL</b>\n"
+        f"📈 <b>TEST REYTINGI: BATAFSIL</b>\n"
         f"{Assets.D_LINE}\n"
         f"🏷 Fan: <b>{t_name}</b>\n"
         f"🔑 Kod: <code>{kod}</code>\n"
-        f"👥 Test ishlaganlar soni: <b>{len(results)} kishi</b>\n"
+        f"👥 Qatnashchilar: <b>{len(results)} kishi</b>\n"
         f"{Assets.S_LINE}\n\n"
     )
 
     for i, r in enumerate(results, 1):
-        text += f"<b>{i}. {html.escape(r['fullname'])}</b>\n└ 🏆 {r['m_ball']}/{r['total']} ({r['m_perc']:.1f}%) | 🔄 {r['tries']} marta ishlagan\n\n"
+        text += f"<b>{i}. {html.escape(r['fullname'])}</b>\n└ 🏆 {r['m_ball']}/{r['total']} ({r['m_perc']:.1f}%) | 🔄 {r['tries']} urinish\n\n"
 
-    # Agar ro'yxat juda uzun bo'lib ketsa telegram kesib qoymasligi uchun
-    if len(text) > 4000: text = text[:4000] + "...\n(Ro'yxat uzun)"
+    if len(text) > 4000: text = text[:4000] + "...\n(Ro'yxat kesildi)"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_stats")]])
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
@@ -1124,9 +1083,7 @@ async def back_to_stats_list(call: CallbackQuery):
     if call.from_user.id != Assets.ADMIN_ID: return
     await show_general_stats(call)
 
-# ==========================================================================================
-# KUNLIK STATISTIKA
-# ==========================================================================================
+
 @dp.message(F.text == Assets.ADM_DAILY_STATS)
 async def adm_daily_stats(message: Message):
     if message.from_user.id != Assets.ADMIN_ID:
@@ -1138,7 +1095,7 @@ async def adm_daily_stats(message: Message):
     )
 
     if not results:
-        return await message.answer("📅 <b>Kunlik test bo'yicha hali natijalar yo'q.</b>", parse_mode="HTML")
+        return await message.answer("📅 <b>Kunlik test bo'yicha ma'lumot mavjud emas.</b>", parse_mode="HTML")
 
     text = f"🏆 <b>KUNLIK TEST REYTINGI</b>\n{Assets.D_LINE}\n"
     for i, r in enumerate(results, 1):
@@ -1150,21 +1107,17 @@ async def adm_daily_stats(message: Message):
 
 @dp.callback_query(F.data == "cancel_adm")
 async def cancel_adm(call: CallbackQuery):
-    await call.message.edit_text("🚫 <b>Amal bekor qilindi.</b>", parse_mode="HTML")
+    await call.message.edit_text("🚫 <b>Bekor qilindi.</b>", parse_mode="HTML")
 
 
-# ==========================================================================================
-# XABAR YUBORISH (BROADCAST)
-# ==========================================================================================
 @dp.message(F.text == Assets.ADM_BROADCAST)
 async def broadcast_start(message: Message, state: FSMContext):
     if message.from_user.id != Assets.ADMIN_ID: return
     await state.set_state(Form.adm_broadcast)
     await message.answer(
-        f"📢 <b>BARCHAGA XABAR YUBORISH</b>\n"
+        f"📢 <b>BARCHAGA XABAR YUBORISH PANELI</b>\n"
         f"{Assets.S_LINE}\n"
-        f"Barcha foydalanuvchilarga bormog'i kerak bo'lgan xabarni yuboring.\n"
-        f"<i>Matn, rasm yoki link shaklida bo'lishi mumkin.</i>",
+        f"Yuboriladigan xabar matnini kiriting:",
         reply_markup=UI.back_btn(),
         parse_mode="HTML"
     )
@@ -1176,66 +1129,62 @@ async def broadcast_send(message: Message, state: FSMContext):
     users = DB.run("SELECT uid FROM users", fetch="all")
     msg_text = message.text or ""
     
-    await message.answer("🔄 <i>Xabar barchaga yuborilmoqda, biroz kuting...</i>", parse_mode="HTML")
+    await message.answer("🔄 <i>Yuborilmoqda, kuting...</i>", parse_mode="HTML")
     success, fail = 0, 0
     
     for u in users:
         try:
             design_msg = (
-                f"✨ <b>LOGOS PLATINUM ACADEMY</b> ✨\n"
+                f"✨ <b>A'LO TA'LIM PLATFORMASI</b> ✨\n"
                 f"{Assets.D_LINE}\n\n"
                 f"{msg_text}\n\n"
                 f"{Assets.D_LINE}\n"
-                f"<i>Hurmat bilan, Ma'muriyat 👑</i>"
+                f"<i>Tizim ma'muriyati 👑</i>"
             )
             await bot.send_message(u['uid'], design_msg, parse_mode="HTML")
             success += 1
-            await asyncio.sleep(0.05) # Anti-spam
+            await asyncio.sleep(0.05) 
         except Exception:
             fail += 1
 
     await message.answer(
-        f"✅ <b>Xabaringiz barchaga yetkazildi!</b>\n\n"
-        f"🟢 Yetib bordi: <b>{success} ta</b> foydalanuvchi\n"
-        f"🔴 Bloklaganlar: <b>{fail} ta</b>",
+        f"✅ <b>Yuborish yakunlandi!</b>\n\n"
+        f"🟢 Yetkazildi: <b>{success} ta</b>\n"
+        f"🔴 Muammo: <b>{fail} ta</b>",
         reply_markup=UI.admin_menu(), parse_mode="HTML"
     )
     await state.clear()
 
 
 # ==========================================================================================
-# WEB API / SAYT UCHUN
+# WEB SAYT INTEGRATSIYASI VA API TARMOG'I
 # ==========================================================================================
 @dp.message(F.text == Assets.ICO_WEB)
 async def generate_web_code(message: Message):
     user_id = message.from_user.id
-    
-    # Avval kod olganligini tekshiramiz
     existing = DB.run("SELECT code FROM web_codes WHERE uid=?", (user_id,), fetch="one")
     
     if existing:
         code = existing['code']
         text = (
-            f"🌐 <b>Sizning veb-sayt uchun kodingiz:</b>\n"
+            f"🌐 <b>Saytga kirish uchun maxsus ID kod:</b>\n"
             f"{Assets.S_LINE}\n\n"
             f"🔑 Kod: <code>{code}</code>\n\n"
-            f"<i>Saytga kirishda ushbu 4 xonali koddan ID sifatida foydalaning.</i>"
+            f"<i>Saytga kirganda ushbu 4 xonali kodni yozing va tizimga kiring.</i>"
         )
     else:
-        # Haqiqiy noyob 4 xonali tasodifiy kod yaratish
         while True:
             code = str(random.randint(1000, 9999))
             check = DB.run("SELECT uid FROM web_codes WHERE code=?", (code,), fetch="one")
             if not check:
                 break
         
-        # Bazaga saqlash
         DB.run("INSERT INTO web_codes (uid, code) VALUES (?, ?)", (user_id, code))
         text = (
-            f"🎉 <b>Sayt uchun muvaffaqiyatli ro'yxatdan o'tdingiz!</b>\n"
+            f"🎉 <b>Veb-sayt uchun kod generatsiya qilindi!</b>\n"
             f"{Assets.S_LINE}\n\n"
-            f"🔑 Sizning maxsus kodingiz: <code>{code}</code>\n\n"
-            f"<i>Iltimos, ushbu kodni hech kimga bermang va saytga kirishda foydalaning.</i>"
+            f"🔑 Kirish kodi: <code>{code}</code>\n\n"
+            f"<i>Ushbu kodni maxfiy saqlang. Saytga kirishda foydalaniladi.</i>"
         )
         
     await message.answer(text, reply_markup=UI.main_menu(user_id), parse_mode="HTML")
@@ -1252,66 +1201,28 @@ async def api_login(request):
     try:
         data = await request.json()
         entered_code = data.get("student_id", "").strip()
-        
-        # 4 xonali kod orqali bazadan qidiramiz
         web_user = DB.run("SELECT * FROM web_codes WHERE code=?", (entered_code,), fetch="one")
         
         if web_user:
-            # Kod to'g'ri bo'lsa, foydalanuvchining ismini asosiy 'users' jadvalidan olamiz
             user = DB.run("SELECT * FROM users WHERE uid=?", (web_user["uid"],), fetch="one")
             if user:
                 return web.json_response({
                     "success": True, 
                     "name": user["fullname"], 
-                    "uid": user["uid"], # SHU QATOR QO'SHILDI
+                    "uid": user["uid"], 
                     "role": "admin" if user["uid"] == Assets.ADMIN_ID else "user"
                 }, headers={'Access-Control-Allow-Origin': '*'})
                 
         return web.json_response({
             "success": False, 
-            "error": "Kod xato yoki bazada yo'q! Botga kirib '🌐 Saytga kirish kodi' tugmasini bosing."
+            "error": "Tizim ID xato yoki ro'yxatda yo'q! Botimiz orqali 'Saytga kirish kodi' tugmasini bosing."
         }, status=400, headers={'Access-Control-Allow-Origin': '*'})
 
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=500, headers={'Access-Control-Allow-Origin': '*'})
 
 
-# ==========================================================================================
-# MAIN / WEB SERVER (Render uchun)
-# ==========================================================================================
-async def handle(request):
-    return web.Response(text="Bot is running!")
-
-async def main():
-    try:
-        DB.setup()
-        
-        # Veb-serverni ishga tushirish
-        app = web.Application()
-        app.router.add_get("/", handle)
-        app.router.add_options("/api/login", api_login)
-        app.router.add_post("/api/login", api_login)
-        app.router.add_options("/api/save_result", api_save_result)
-        app.router.add_post("/api/save_result", api_save_result)
-        
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
-        await site.start()
-
-        # Bot buyruqlarini sozlash
-        await bot.set_my_commands([
-            BotCommand(command="start", description="🏠 Asosiy menyu")
-        ])
-        
-        # 🌟 JUDA MUHIM: Bot o'chib qolmasligi uchun uni doimiy yoqib qo'yamiz
-        await dp.start_polling(bot)
-        
-    finally:
-        # 🌟 Unclosed client session xatosini butunlay yo'qotish uchun:
-        await bot.session.close()
 async def api_save_result(request):
-    # CORS muammosini oldini olish
     if request.method == 'OPTIONS':
         return web.Response(headers={
             'Access-Control-Allow-Origin': '*',
@@ -1326,11 +1237,9 @@ async def api_save_result(request):
         ball = data.get("ball")
         total = data.get("total")
         
-        # Foizni hisoblash
         perc = (ball / total) * 100 if total else 0
-        mistakes = "Veb-sayt orqali ishlangan"
+        mistakes = "Veb-sayt platformasida yechildi"
         
-        # Ma'lumotni bazadagi 'results' jadvaliga yozish
         DB.run(
             "INSERT INTO results (uid, kod, ball, total, perc, mistakes, timestamp) VALUES (?,?,?,?,?,?,?)",
             (uid, test_kod, ball, total, perc, mistakes, datetime.now().isoformat())
@@ -1339,8 +1248,41 @@ async def api_save_result(request):
         return web.json_response({"success": True}, headers={'Access-Control-Allow-Origin': '*'})
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=500, headers={'Access-Control-Allow-Origin': '*'})
-    print("💎 LOGOS PLATINUM V4.8 IS RUNNING...")
-    await dp.start_polling(bot)
+
+
+# ==========================================================================================
+# SERVER VA POLLING START (PORT SHART)
+# ==========================================================================================
+async def handle(request):
+    return web.Response(text="A'lo Ta'lim bot and sync system is running!")
+
+async def main():
+    try:
+        DB.setup()
+        
+        # Veb-server port sozlashi va API yo'llari
+        app = web.Application()
+        app.router.add_get("/", handle)
+        app.router.add_options("/api/login", api_login)
+        app.router.add_post("/api/login", api_login)
+        app.router.add_options("/api/save_result", api_save_result)
+        app.router.add_post("/api/save_result", api_save_result)
+        
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 8080)))
+        await site.start()
+
+        # Bot menyu buyrug'i
+        await bot.set_my_commands([
+            BotCommand(command="start", description="🏠 Asosiy menyuni yuklash")
+        ])
+        
+        print("💎 A'LO TA'LIM BOT AND SYNC SYSTEM IS RUNNING ON PORT 8080...")
+        await dp.start_polling(bot)
+        
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
