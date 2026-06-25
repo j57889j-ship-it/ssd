@@ -1,56 +1,44 @@
 """
 ==========================================================================================
-💎 A'LO TA'LIM - PREMIUM INTEGRATSIYA TIZIMI (v5.5 PRO)
+🌟 A'LO TA'LIM PLATFORMASI - PREMIUM INTEGRATSIYA BOTI 🌟
 ==========================================================================================
-Muallif: A'lo Ta'lim Platformasi
-Tavsif: Telegram bot va Web API integratsiyasi. Ushbu tizim foydalanuvchilarni 
-        ro'yxatdan o'tkazish, ularga maxsus veb-kodlar berish, admin paneli orqali 
-        boshqarish va mukammal xizmat ko'rsatish uchun mo'ljallangan.
+Versiya: 6.0.0 (Ultimate Edition)
+Tuzuvchi: Premium Developer Team / AI
+Tavsif: Telegram bot va Web API integratsiyasi. Asinxron baza (aiosqlite),
+        kengaytirilgan xavfsizlik, chiroyli UI/UX va boy admin panelga ega.
 
-Yangi Foydalanuvchi Funksiyalari (5 ta):
-1. 📚 FAQ (Ko'p so'raladigan savollar) tizimi
-2. ⚙️ Shaxsiy Sozlamalar (Ismni o'zgartirish, Bildirishnomalarni yoqish/o'chirish)
-3. ⭐ Baholash va Fikr-mulohaza qoldirish (Fidbek tizimi)
-4. 👥 Referal Dastur (Do'stlarni taklif qilish va ball yig'ish reytingi)
-5. 🔐 Tizimga kirish tarixi (Saytga qachon kirilganligini kuzatish)
-
-Yangi Admin Funksiyalari (8 ta):
-1. 📈 Kengaytirilgan chuqur statistika (Kunlik, umumiy)
-2. 📢 Murakkab Broadcast (Rasm/Video + Matn yuborish)
-3. 👥 Foydalanuvchilarni individual boshqarish (Ban/Unban qilish, kodini o'chirish)
-4. 🗂 Ma'lumotlar bazasini eksport qilish (Excel/CSV formatida yuklab olish)
-5. ⚙️ Tizim Sozlamalari (Texnik xizmat / Maintenance rejimini yoqish)
-6. 📢 Majburiy obuna kanallarini bot orqali boshqarish (Qo'shish/O'chirish)
-7. ⭐ Foydalanuvchilar qoldirgan fikr-mulohazalarni o'qish
-8. 🔑 Barcha veb-kodlarni xavfsizlik uchun birdaniga bekor qilish
-
-Maksimal darajada xavfsizlik va Anti-Spam tizimlari bilan ta'minlangan.
+Asosiy xususiyatlar:
+- Asinxron SQLite (aiosqlite) bilan yuqori tezlik.
+- Foydalanuvchilar uchun: FAQ, Tarix, Sozlamalar, Profil, Web Kod, Support.
+- Admin uchun: Ban tizimi, Obuna kanallarini boshqarish, CSV Export,
+  Direct Message, Broadcast, Kengaytirilgan Statistika.
+- Global xatolarni ushlash va mukammal Logging tizimi.
 ==========================================================================================
 """
 
 import asyncio
 import logging
 import os
-import sqlite3
 import html
 import random
 import csv
-from io import StringIO, BytesIO
-from datetime import datetime, timedelta
+import io
+from datetime import datetime
 from typing import Final, Any, Optional, List, Dict
 
+# Tashqi kutubxonalar
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, BaseMiddleware
 from aiogram.types import (
     Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton,
-    ReplyKeyboardMarkup, KeyboardButton, BotCommand, BufferedInputFile
+    ReplyKeyboardMarkup, KeyboardButton, BotCommand, BufferedInputFile, Update
 )
 from aiogram.filters import Command, or_f, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+import aiosqlite
 
 from dotenv import load_dotenv
 
@@ -58,93 +46,117 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ==========================================================================================
-# ⚙️ 1. ASOSIY KONFIGURATSIYA VA O'ZGARUVCHILAR
+# 💎 1. KONFIGURATSIYA VA O'ZGARMASLAR (CONSTANTS)
 # ==========================================================================================
 class Config:
-    TOKEN: Final[str] = os.getenv("BOT_TOKEN", "") # O'zingizning bot tokeningizni qo'ying
+    """Botning asosiy sozlamalari va ma'lumotlari."""
+    TOKEN: Final[str] = os.getenv("BOT_TOKEN", "SIZNING_BOT_TOKENINGIZ")
     ADMIN_ID: Final[int] = int(os.getenv("ADMIN_ID", "0") or "0")
     DB_NAME: Final[str] = os.getenv("DB_NAME", "premium_database.db")
-    PORT: Final[int] = int(os.getenv("PORT", "8080"))
-    
-    # Premium Dizayn elementlari
-    H_LINE = "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
-    D_LINE = "<b>▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬</b>"
-    S_LINE = "<b>────────────────────────────</b>"
+    PORT: Final[int] = int(os.getenv("PORT", 8080))
+    HOST: Final[str] = os.getenv("HOST", "0.0.0.0")
+
+class Design:
+    """Dizayn va matn formatlash o'zgarmaslari."""
+    D_LINE = "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>"
+    S_LINE = "<b>─────────────────────────────</b>"
+    TITLE = "🎓 <b>A'LO TA'LIM PLATFORMASI</b>"
     
     # Menyu tugmalari (Foydalanuvchi)
     BTN_WEB = "🌐 Saytga kirish"
-    BTN_PROF = "👤 Mening Kabinetim"
-    BTN_REF = "👥 Referal Dastur"
-    BTN_FAQ = "📚 FAQ"
-    BTN_FEEDBACK = "⭐ Fikr Bildirish"
+    BTN_PROF = "👤 Shaxsiy Kabinet"
+    BTN_FAQ = "📚 Ko'p so'raladigan savollar"
     BTN_SETTINGS = "⚙️ Sozlamalar"
-    BTN_HELP = "🆘 Adminga yozish"
-    
-    # Menyu tugmalari (Umumiy)
+    BTN_HELP = "🆘 Adminga murojaat"
+    BTN_HISTORY = "📱 Kirish tarixi"
     BTN_BACK = "⬅️ Orqaga"
     BTN_HOME = "🏠 Asosiy Menyu"
-    
-    # Menyu tugmalari (Admin)
-    BTN_ADM_PANEL = "🛠 Admin Panel"
-    BTN_ADM_STATS = "📊 Statistika"
-    BTN_ADM_USERS = "👥 Foydalanuvchilar"
-    BTN_ADM_BROADCAST = "📢 Xabar Yuborish"
-    BTN_ADM_EXPORT = "🗂 DB Eksport"
-    BTN_ADM_CHANNELS = "📢 Kanallar"
-    BTN_ADM_FEEDBACKS = "⭐ Fikrlar"
-    BTN_ADM_SETTINGS = "⚙️ Tizim Rejimi"
-    BTN_ADM_SECURITY = "🔐 Xavfsizlik"
+    BTN_ADM = "🛠 Admin Panel"
 
+    # Menyu tugmalari (Admin)
+    ADM_STATS = "📊 Statistika"
+    ADM_BROADCAST = "📢 Barchaga Xabar"
+    ADM_DIRECT = "✉️ Shaxsiy xabar yuborish"
+    ADM_BAN_SYS = "🚫 Ban Tizimi"
+    ADM_CHANNELS = "📢 Obunalarni boshqarish"
+    ADM_EXPORT = "📥 Bazani yuklash (CSV)"
+
+class Texts:
+    """Botda ishlatiladigan asosiy matnlar."""
+    WELCOME = (
+        f"{Design.TITLE}\n"
+        f"{Design.D_LINE}\n\n"
+        f"👋 Assalomu alaykum, <b>{{name}}</b>!\n"
+        f"Bizning innovatsion ta'lim platformamizga xush kelibsiz.\n\n"
+        f"<i>Tizimdan to'liq foydalanish uchun ro'yxatdan o'tishingiz kerak.</i>\n"
+        f"✍️ <b>Iltimos, ism va familiyangizni kiriting:</b>\n\n"
+        f"💡 <i>Namuna: Abdurahmon Alimov</i>"
+    )
+    
+    MAIN_MENU = (
+        f"{Design.TITLE}\n"
+        f"{Design.D_LINE}\n\n"
+        f"👤 Profil: <b>{{name}}</b>\n"
+        f"⚡️ Holat: <b>Faol a'zo</b>\n\n"
+        f"📅 Sana: <b>{{date}}</b>\n"
+        f"🕒 Vaqt: <b>{{time}}</b>\n\n"
+        f"👇 <i>Quyidagi interaktiv menyudan kerakli bo'limni tanlang:</i>"
+    )
+
+    BANNED = (
+        f"⛔️ <b>DIQQAT: SIZ BLOKLANGANSIZ!</b>\n"
+        f"{Design.D_LINE}\n\n"
+        f"Sizning hisobingiz tizim qoidalarini buzganligi sababli ma'muriyat tomonidan bloklangan.\n"
+        f"Veb-saytga va bot xizmatlariga kirish vaqtincha cheklangan.\n\n"
+        f"<i>Murojaat uchun: Ma'muriyat bilan bog'laning.</i>"
+    )
+
+
+# ==========================================================================================
+# ⚙️ 2. LOGGING SOZLAMALARI
+# ==========================================================================================
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
 
+# Asosiy bot va dispatcher obyektlari
 bot = Bot(token=Config.TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 
 # ==========================================================================================
-# 🗄 2. MA'LUMOTLAR BAZASI (KENGAYTIRILGAN)
+# 🗄 3. ASINXRON MA'LUMOTLAR BAZASI (AIOSQLITE) - KENGAYTIRILGAN
 # ==========================================================================================
-class DB:
+class AsyncDB:
+    """aiosqlite asosidagi mukammal ma'lumotlar bazasi klassi."""
+    
     @staticmethod
-    def connect():
-        conn = sqlite3.connect(Config.DB_NAME)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    @classmethod
-    def setup(cls):
-        with cls.connect() as conn:
-            c = conn.cursor()
-            
-            # Foydalanuvchilar
-            c.execute("""
+    async def setup():
+        """Barcha kerakli jadvallarni yaratish."""
+        async with aiosqlite.connect(Config.DB_NAME) as db:
+            # 1. Foydalanuvchilar jadvali
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     uid INTEGER PRIMARY KEY,
                     fullname TEXT,
                     username TEXT,
                     joined_at TIMESTAMP,
-                    is_banned INTEGER DEFAULT 0,
-                    referrer_id INTEGER DEFAULT 0,
-                    points INTEGER DEFAULT 0,
-                    notifications INTEGER DEFAULT 1
+                    is_banned INTEGER DEFAULT 0
                 )
             """)
-            
-            # Veb kodlar
-            c.execute("""
+            # 2. Veb kodlar jadvali
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS web_codes (
                     uid INTEGER PRIMARY KEY,
                     code TEXT UNIQUE,
                     created_at TIMESTAMP
                 )
             """)
-            
-            # Murojaatlar
-            c.execute("""
+            # 3. Yordam xabarlari
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS support_messages (
                     mid INTEGER PRIMARY KEY AUTOINCREMENT,
                     uid INTEGER,
@@ -153,955 +165,803 @@ class DB:
                     is_replied INTEGER DEFAULT 0
                 )
             """)
-            
-            # Fikr-mulohazalar (YANGI)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS feedbacks (
-                    fid INTEGER PRIMARY KEY AUTOINCREMENT,
-                    uid INTEGER,
-                    stars INTEGER,
-                    comment TEXT,
-                    created_at TIMESTAMP
-                )
-            """)
-            
-            # Saytga kirish tarixi (YANGI)
-            c.execute("""
+            # 4. Kirish tarixi (YANGI)
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS login_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     uid INTEGER,
                     ip_address TEXT,
+                    user_agent TEXT,
                     login_time TIMESTAMP,
                     status TEXT
                 )
             """)
-            
-            # Majburiy kanallar (YANGI)
-            c.execute("""
+            # 5. Majburiy obunalar (YANGI)
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS channels (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     channel_id TEXT UNIQUE,
-                    channel_name TEXT
+                    channel_name TEXT,
+                    url TEXT
                 )
             """)
-            
-            # Tizim sozlamalari (YANGI)
-            c.execute("""
-                CREATE TABLE IF NOT EXISTS system_settings (
-                    setting_key TEXT PRIMARY KEY,
-                    setting_value TEXT
-                )
-            """)
-            
-            # Dastlabki sozlamalarni kiritish
-            c.execute("INSERT OR IGNORE INTO system_settings (setting_key, setting_value) VALUES ('maintenance', '0')")
-            
-            conn.commit()
+            await db.commit()
+            logger.info("Database tables verified and ready.")
 
-    @classmethod
-    def execute(cls, sql: str, params: tuple = ()) -> int:
-        with cls.connect() as conn:
-            c = conn.cursor()
-            c.execute(sql, params)
-            conn.commit()
-            return c.lastrowid
+    @staticmethod
+    async def execute(sql: str, params: tuple = ()) -> None:
+        """Ma'lumotni kiritish yoki yangilash."""
+        async with aiosqlite.connect(Config.DB_NAME) as db:
+            await db.execute(sql, params)
+            await db.commit()
 
-    @classmethod
-    def fetchone(cls, sql: str, params: tuple = ()) -> Optional[sqlite3.Row]:
-        with cls.connect() as conn:
-            c = conn.cursor()
-            c.execute(sql, params)
-            return c.fetchone()
+    @staticmethod
+    async def execute_return_id(sql: str, params: tuple = ()) -> int:
+        """Ma'lumotni kiritib, oxirgi ID ni qaytarish."""
+        async with aiosqlite.connect(Config.DB_NAME) as db:
+            cursor = await db.execute(sql, params)
+            await db.commit()
+            return cursor.lastrowid
 
-    @classmethod
-    def fetchall(cls, sql: str, params: tuple = ()) -> List[sqlite3.Row]:
-        with cls.connect() as conn:
-            c = conn.cursor()
-            c.execute(sql, params)
-            return c.fetchall()
+    @staticmethod
+    async def fetchone(sql: str, params: tuple = ()) -> Optional[Dict]:
+        """Bitta qator ma'lumotni olish."""
+        async with aiosqlite.connect(Config.DB_NAME) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(sql, params) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
 
-    @classmethod
-    def get_setting(cls, key: str) -> str:
-        res = cls.fetchone("SELECT setting_value FROM system_settings WHERE setting_key=?", (key,))
-        return res['setting_value'] if res else ""
-
-    @classmethod
-    def set_setting(cls, key: str, value: str):
-        cls.execute("INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES (?, ?)", (key, value))
+    @staticmethod
+    async def fetchall(sql: str, params: tuple = ()) -> List[Dict]:
+        """Barcha qatorlarni olish."""
+        async with aiosqlite.connect(Config.DB_NAME) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
 
 
 # ==========================================================================================
-# 🧠 3. HOLATLAR (FSM STATES)
+# 🧠 4. STATE MANAGER (FSM HOLATLAR)
 # ==========================================================================================
 class Form(StatesGroup):
-    reg_name = State()
+    reg_name = State()            # Ismni kiritish
+    support_msg = State()         # Adminga yozish
+    settings_name = State()       # Ismni o'zgartirish
     
-    # Foydalanuvchi qismi
-    support_msg = State()
-    feedback_msg = State()
-    settings_name = State()
-    
-    # Admin qismi
-    adm_reply = State()
-    adm_broadcast_msg = State()
-    adm_broadcast_confirm = State()
-    adm_manage_user = State()
-    adm_add_channel_name = State()
-    adm_add_channel_id = State()
+    # Admin holatlari
+    adm_reply = State()           # Admindan javob
+    adm_bc_text = State()         # Barchaga xabar
+    adm_bc_confirm = State()      # Xabarni tasdiqlash
+    adm_direct_id = State()       # Shaxsiy xabar uchun ID
+    adm_direct_msg = State()      # Shaxsiy xabar matni
+    adm_ban_id = State()          # Ban qilish uchun ID
+    adm_unban_id = State()        # Bandan olish uchun ID
+    adm_add_channel_data = State()# Kanal qo'shish (ID, Name, URL)
 
 
 # ==========================================================================================
-# 🎨 4. KLAVIATURALAR VA UI BUILDERLAR
+# 🎨 5. UI VA KLAVIATURALAR TIZIMI (KEYBOARDS)
 # ==========================================================================================
-class Keyboards:
+class UI:
+    """Interfeys va klaviaturalarni shakllantiruvchi klass."""
+    
     @staticmethod
     def main_menu(user_id: int):
         b = ReplyKeyboardBuilder()
-        b.row(KeyboardButton(text=Config.BTN_WEB), KeyboardButton(text=Config.BTN_PROF))
-        b.row(KeyboardButton(text=Config.BTN_REF), KeyboardButton(text=Config.BTN_SETTINGS))
-        b.row(KeyboardButton(text=Config.BTN_FAQ), KeyboardButton(text=Config.BTN_HELP))
-        b.row(KeyboardButton(text=Config.BTN_FEEDBACK))
-        
+        b.row(KeyboardButton(text=Design.BTN_WEB), KeyboardButton(text=Design.BTN_PROF))
+        b.row(KeyboardButton(text=Design.BTN_FAQ), KeyboardButton(text=Design.BTN_HISTORY))
+        b.row(KeyboardButton(text=Design.BTN_SETTINGS), KeyboardButton(text=Design.BTN_HELP))
         if user_id == Config.ADMIN_ID:
-            b.row(KeyboardButton(text=Config.BTN_ADM_PANEL))
-            
-        b.adjust(2, 2, 2, 1, 1)
+            b.row(KeyboardButton(text=Design.BTN_ADM))
         return b.as_markup(resize_keyboard=True)
-
+        
     @staticmethod
     def admin_menu():
         b = ReplyKeyboardBuilder()
-        b.row(KeyboardButton(text=Config.BTN_ADM_STATS), KeyboardButton(text=Config.BTN_ADM_USERS))
-        b.row(KeyboardButton(text=Config.BTN_ADM_BROADCAST), KeyboardButton(text=Config.BTN_ADM_CHANNELS))
-        b.row(KeyboardButton(text=Config.BTN_ADM_EXPORT), KeyboardButton(text=Config.BTN_ADM_FEEDBACKS))
-        b.row(KeyboardButton(text=Config.BTN_ADM_SETTINGS), KeyboardButton(text=Config.BTN_ADM_SECURITY))
-        b.row(KeyboardButton(text=Config.BTN_HOME))
-        b.adjust(2, 2, 2, 2, 1)
+        b.row(KeyboardButton(text=Design.ADM_STATS), KeyboardButton(text=Design.ADM_BROADCAST))
+        b.row(KeyboardButton(text=Design.ADM_DIRECT), KeyboardButton(text=Design.ADM_BAN_SYS))
+        b.row(KeyboardButton(text=Design.ADM_CHANNELS), KeyboardButton(text=Design.ADM_EXPORT))
+        b.row(KeyboardButton(text=Design.BTN_HOME))
         return b.as_markup(resize_keyboard=True)
 
     @staticmethod
-    def back_home():
+    def back_btn():
         return ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text=Config.BTN_BACK), KeyboardButton(text=Config.BTN_HOME)]],
+            keyboard=[[KeyboardButton(text=Design.BTN_BACK)]],
             resize_keyboard=True
         )
 
     @staticmethod
-    def just_back():
-        return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=Config.BTN_BACK)]], resize_keyboard=True)
-
-    @staticmethod
-    def web_code(has_code: bool):
-        b = InlineKeyboardBuilder()
+    def get_web_code_markup(has_code: bool) -> InlineKeyboardMarkup:
+        kb = InlineKeyboardBuilder()
         if has_code:
-            b.row(
-                InlineKeyboardButton(text="🔄 Yangilash", callback_data="web_regenerate"),
-                InlineKeyboardButton(text="🗑 O'chirish", callback_data="web_delete")
-            )
-            b.row(InlineKeyboardButton(text="📜 Kirish tarixini ko'rish", callback_data="web_history"))
+            kb.row(InlineKeyboardButton(text="🔄 Kodni Yangilash", callback_data="code_regenerate"))
+            kb.row(InlineKeyboardButton(text="🗑 Kodni O'chirish", callback_data="code_delete"))
         else:
-            b.row(InlineKeyboardButton(text="🔑 Yangi Kod Yaratish", callback_data="web_generate"))
-        return b.as_markup()
+            kb.row(InlineKeyboardButton(text="🔑 Yangi Kod Yaratish", callback_data="code_generate"))
+        return kb.as_markup()
 
     @staticmethod
-    def settings_menu(notifications: bool):
-        b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="✏️ Ismni o'zgartirish", callback_data="set_name"))
-        notif_text = "🔔 Xabarnomalar: YOQILGAN" if notifications else "🔕 Xabarnomalar: O'CHIRILGAN"
-        b.row(InlineKeyboardButton(text=notif_text, callback_data="set_notifications"))
-        return b.as_markup()
+    def settings_markup() -> InlineKeyboardMarkup:
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="📝 Ismni o'zgartirish", callback_data="set_change_name"))
+        kb.row(InlineKeyboardButton(text="ℹ️ Bot haqida", callback_data="set_about"))
+        return kb.as_markup()
 
     @staticmethod
-    def stars_keyboard():
-        b = InlineKeyboardBuilder()
-        b.row(
-            InlineKeyboardButton(text="⭐", callback_data="star_1"),
-            InlineKeyboardButton(text="⭐⭐", callback_data="star_2"),
-            InlineKeyboardButton(text="⭐⭐⭐", callback_data="star_3")
-        )
-        b.row(
-            InlineKeyboardButton(text="⭐⭐⭐⭐", callback_data="star_4"),
-            InlineKeyboardButton(text="⭐⭐⭐⭐⭐", callback_data="star_5")
-        )
-        return b.as_markup()
+    def faq_markup() -> InlineKeyboardMarkup:
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="1️⃣ Saytga qanday kiraman?", callback_data="faq_1"))
+        kb.row(InlineKeyboardButton(text="2️⃣ Kodim ishlamayapti, nima qilay?", callback_data="faq_2"))
+        kb.row(InlineKeyboardButton(text="3️⃣ Ma'lumotlarim xavfsizmi?", callback_data="faq_3"))
+        kb.row(InlineKeyboardButton(text="4️⃣ Admin bilan bog'lanish", callback_data="faq_4"))
+        return kb.as_markup()
 
-
-# ==========================================================================================
-# 🛡 5. MIDDLEWARE (XAVFSIZLIK VA NAZORAT)
-# ==========================================================================================
-class SecurityMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event: Message | CallbackQuery, data: Dict[str, Any]):
-        user_id = event.from_user.id
+    @staticmethod
+    def admin_ban_markup() -> InlineKeyboardMarkup:
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="🚫 Ban berish", callback_data="admin_do_ban"))
+        kb.row(InlineKeyboardButton(text="✅ Bandan olish", callback_data="admin_do_unban"))
+        return kb.as_markup()
         
-        # Texnik xizmat rejimi tekshiruvi
-        is_maintenance = DB.get_setting('maintenance') == '1'
-        if is_maintenance and user_id != Config.ADMIN_ID:
-            msg = "⚙️ <b>Tizimda texnik ishlar olib borilmoqda!</b>\nIltimos, birozdan so'ng qayta urinib ko'ring."
-            if isinstance(event, Message):
-                await event.answer(msg, parse_mode="HTML")
-            else:
-                await event.answer(msg, show_alert=True)
-            return
+    @staticmethod
+    def admin_channel_markup() -> InlineKeyboardMarkup:
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text="➕ Kanal qo'shish", callback_data="admin_ch_add"))
+        kb.row(InlineKeyboardButton(text="➖ Kanal o'chirish", callback_data="admin_ch_del"))
+        kb.row(InlineKeyboardButton(text="📋 Kanallar ro'yxati", callback_data="admin_ch_list"))
+        return kb.as_markup()
 
-        # Ban tekshiruvi
-        user = DB.fetchone("SELECT is_banned FROM users WHERE uid=?", (user_id,))
-        if user and user['is_banned'] == 1:
-            msg = "🚫 <b>Sizning hisobingiz tizim qoidalarini buzganlik uchun bloklangan!</b>\nMurojaat uchun adminga yozing."
-            if isinstance(event, Message):
-                await event.answer(msg, parse_mode="HTML")
-            else:
-                await event.answer(msg, show_alert=True)
-            return
 
+# ==========================================================================================
+# 🛡 6. MIDDLEWARE (XAVFSIZLIK VA TEKSHIRUVLAR)
+# ==========================================================================================
+class BanCheckMiddleware(BaseMiddleware):
+    """Har bir xabardan oldin foydalanuvchining ban holatini tekshiradi."""
+    async def __call__(self, handler, event: Update, data: dict):
+        user_id = None
+        if event.message:
+            user_id = event.message.from_user.id
+        elif event.callback_query:
+            user_id = event.callback_query.from_user.id
+
+        if user_id:
+            user = await AsyncDB.fetchone("SELECT is_banned FROM users WHERE uid=?", (user_id,))
+            if user and user['is_banned'] == 1:
+                if event.message:
+                    await event.message.answer(Texts.BANNED, parse_mode="HTML")
+                elif event.callback_query:
+                    await event.callback_query.answer("Siz bloklangansiz!", show_alert=True)
+                return # Keyingi handlerga o'tkazmaydi
         return await handler(event, data)
 
-dp.message.middleware(SecurityMiddleware())
-dp.callback_query.middleware(SecurityMiddleware())
+dp.update.middleware(BanCheckMiddleware())
 
 
-# ==========================================================================================
-# 🔄 6. YORDAMCHI FUNKSIYALAR
-# ==========================================================================================
-def format_dt(dt_str: str) -> str:
-    if not dt_str: return "Noma'lum"
-    try:
-        dt = datetime.fromisoformat(dt_str)
-        return dt.strftime("%d.%m.%Y %H:%M:%S")
-    except:
-        return dt_str[:19]
-
-def gen_code() -> str:
-    while True:
-        code = str(random.randint(1000, 9999))
-        if not DB.fetchone("SELECT uid FROM web_codes WHERE code=?", (code,)):
-            return code
-
-async def check_subscriptions(bot: Bot, user_id: int) -> bool:
-    channels = DB.fetchall("SELECT channel_id FROM channels")
+# Majburiy obunani tekshirish funksiyasi
+async def check_subscription(bot: Bot, user_id: int) -> bool:
+    channels = await AsyncDB.fetchall("SELECT channel_id FROM channels")
     if not channels:
-        return True
-    
+        return True # Agar kanallar yo'q bo'lsa, o'tkazib yuboradi
+        
     for ch in channels:
         try:
-            member = await bot.get_chat_member(chat_id=ch['channel_id'], user_id=user_id)
+            member = await bot.get_chat_member(chat_id=ch["channel_id"], user_id=user_id)
             if member.status in ['left', 'kicked', 'banned']:
                 return False
         except Exception as e:
-            logger.warning(f"Kanalni tekshirishda xatolik {ch['channel_id']}: {e}")
-            return False # Agar bot kanalda admin bo'lmasa xato beradi
+            logger.error(f"Kanal tekshirishda xatolik ({ch['channel_id']}): {e}")
+            return False 
     return True
 
-def get_sub_keyboard():
-    b = InlineKeyboardBuilder()
-    channels = DB.fetchall("SELECT channel_id, channel_name FROM channels")
+async def get_sub_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    channels = await AsyncDB.fetchall("SELECT channel_name, url FROM channels")
     for ch in channels:
-        cid = ch['channel_id'].replace("@", "")
-        b.row(InlineKeyboardButton(text=ch['channel_name'], url=f"https://t.me/{cid}"))
-    b.row(InlineKeyboardButton(text="✅ Obunani Tasdiqlash", callback_data="check_sub"))
-    return b.as_markup()
+        builder.row(InlineKeyboardButton(text=ch["channel_name"], url=ch["url"]))
+    builder.row(InlineKeyboardButton(text="✅ Obunani Tasdiqlash", callback_data="check_sub_btn"))
+    return builder.as_markup()
 
 
 # ==========================================================================================
-# 🚀 7. ASOSIY HANDLERLAR (RO'YXATDAN O'TISH)
+# YORDAMCHI FUNKSIYALAR
 # ==========================================================================================
-@dp.message(Command("start"))
+def fmt_dt(value: Optional[str]) -> str:
+    """Sanani o'zbekcha chiroyli formatga o'tkazadi."""
+    if not value: return "-"
+    try:
+        dt = datetime.fromisoformat(value)
+        return dt.strftime("%d.%m.%Y y. %H:%M")
+    except Exception:
+        return str(value)[:16]
+
+def gen_code() -> str:
+    """Faqat sonlardan iborat 4 xonali noyob kod yaratadi."""
+    return f"{random.randint(1000, 9999)}"
+
+
+# ==========================================================================================
+# 🚀 7. ASOSIY HANDLERLAR (START VA REGISTRATSIYA)
+# ==========================================================================================
+@dp.message(or_f(Command("start"), F.text == Design.BTN_HOME, F.text == Design.BTN_BACK))
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     await state.clear()
     user_id = message.from_user.id
     
-    # Referal tizimi orqali kirganligini tekshirish
-    args = message.text.split()[1] if len(message.text.split()) > 1 else None
-    referrer_id = 0
-    if args and args.startswith("ref_"):
-        try:
-            ref_id = int(args.split("_")[1])
-            if ref_id != user_id:
-                referrer_id = ref_id
-        except:
-            pass
-
     # Obuna tekshiruvi
-    if not await check_subscriptions(bot, user_id):
+    is_sub = await check_subscription(bot, user_id)
+    if not is_sub:
         text = (
-            f"🛑 <b>DIQQAT! Tizimdan foydalanish uchun obuna bo'ling!</b>\n"
-            f"{Config.S_LINE}\n"
-            f"Barcha funksiyalarni ochish uchun quyidagi kanallarga a'zo bo'ling."
+            f"🛑 <b>DIQQAT: MAJBURIY OBUNA!</b>\n"
+            f"{Design.D_LINE}\n\n"
+            f"Bot xizmatlaridan foydalanish uchun quyidagi rasmiy kanallarimizga a'zo bo'lishingiz shart.\n\n"
+            f"<i>A'zo bo'lgach, «✅ Obunani Tasdiqlash» tugmasini bosing.</i>"
         )
-        return await message.answer(text, reply_markup=get_sub_keyboard(), parse_mode="HTML")
+        return await message.answer(text, reply_markup=await get_sub_keyboard(), parse_mode="HTML")
 
-    user = DB.fetchone("SELECT * FROM users WHERE uid=?", (user_id,))
+    # Foydalanuvchini bazadan izlash
+    user = await AsyncDB.fetchone("SELECT * FROM users WHERE uid=?", (user_id,))
+    
     if not user:
-        await state.update_data(ref_id=referrer_id)
         await state.set_state(Form.reg_name)
-        text = (
-            f"🌟 <b>A'LO TA'LIM PLATFORMASIGA XUSH KELIBSIZ!</b>\n"
-            f"{Config.D_LINE}\n\n"
-            f"✍️ Tizimdan to'liq foydalanish uchun iltimos, <b>Ism va Familiyangizni</b> kiriting:\n\n"
-            f"💡 <i>Namuna: Alisher Navoiy</i>"
+        await message.answer(
+            Texts.WELCOME.format(name=html.escape(message.from_user.first_name)),
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True) # Klaviaturani yopish
         )
-        return await message.answer(text, reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True), parse_mode="HTML")
+    else:
+        now = datetime.now()
+        text = Texts.MAIN_MENU.format(
+            name=html.escape(user['fullname']),
+            date=now.strftime('%d.%m.%Y'),
+            time=now.strftime('%H:%M')
+        )
+        await message.answer(text, reply_markup=UI.main_menu(user_id), parse_mode="HTML")
 
-    text = (
-        f"👑 <b>ASOSIY TIZIM PANELI</b>\n"
-        f"{Config.D_LINE}\n"
-        f"Hurmatli <b>{html.escape(user['fullname'])}</b>, qaytganingizdan xursandmiz!\n\n"
-        f"👇 Kerakli bo'limni tanlang:"
-    )
-    await message.answer(text, reply_markup=Keyboards.main_menu(user_id), parse_mode="HTML")
 
-@dp.callback_query(F.data == "check_sub")
-async def cb_check_sub(call: CallbackQuery, state: FSMContext, bot: Bot):
-    if not await check_subscriptions(bot, call.from_user.id):
-        return await call.answer("❌ Siz barcha kanallarga a'zo bo'lmadingiz!", show_alert=True)
+@dp.callback_query(F.data == "check_sub_btn")
+async def verify_sub_handler(call: CallbackQuery, state: FSMContext, bot: Bot):
+    is_sub = await check_subscription(bot, call.from_user.id)
+    if not is_sub:
+        return await call.answer("❌ Hali hamma kanallarga a'zo bo'lmadingiz!", show_alert=True)
     
     await call.message.delete()
-    # Psevdo-start yuborish
-    message = call.message
-    message.from_user = call.from_user
-    message.text = "/start"
-    await cmd_start(message, state, bot)
+    # Start funksiyasiga qayta yo'naltirish
+    await cmd_start(call.message, state, bot)
+
 
 @dp.message(Form.reg_name)
-async def process_reg_name(message: Message, state: FSMContext):
+async def process_registration(message: Message, state: FSMContext):
     fullname = message.text.strip()
-    if len(fullname) < 4 or " " not in fullname:
-        return await message.answer("⚠️ <b>Iltimos, to'liq Ism va Familiya kiriting!</b> (Masalan: Alisher Navoiy)", parse_mode="HTML")
+    if len(fullname) < 4 or len(fullname) > 50:
+        return await message.answer("⚠️ Iltimos, ismingizni to'g'ri va to'liq kiriting (4-50 harf).")
 
-    data = await state.get_data()
-    ref_id = data.get("ref_id", 0)
-    user_id = message.from_user.id
-    username = message.from_user.username or ""
-    
-    DB.execute(
-        "INSERT INTO users (uid, fullname, username, joined_at, referrer_id) VALUES (?,?,?,?,?)",
-        (user_id, fullname, username, datetime.now().isoformat(), ref_id)
+    uid = message.from_user.id
+    username = message.from_user.username or "mavjud_emas"
+    now_iso = datetime.now().isoformat()
+
+    await AsyncDB.execute(
+        "INSERT INTO users (uid, fullname, username, joined_at) VALUES (?,?,?,?)",
+        (uid, fullname, username, now_iso)
     )
     
-    # Referalga bonus berish
-    if ref_id:
-        DB.execute("UPDATE users SET points = points + 10 WHERE uid=?", (ref_id,))
-        try:
-            await bot.send_message(ref_id, f"🎉 <b>Tabriklaymiz!</b> Sizning taklifingiz orqali <b>{html.escape(fullname)}</b> ro'yxatdan o'tdi va sizga 10 ball berildi!", parse_mode="HTML")
-        except:
-            pass
-
-    await state.clear()
-    text = (
-        f"✅ <b>Muvaffaqiyatli ro'yxatdan o'tdingiz!</b>\n"
-        f"{Config.S_LINE}\n"
-        f"Tizim xizmatlaridan foydalanishingiz mumkin."
+    await message.answer(
+        f"🎉 <b>Tabriklaymiz, {html.escape(fullname)}!</b>\n"
+        f"{Design.D_LINE}\n"
+        f"Siz muvaffaqiyatli ro'yxatdan o'tdingiz. Endi barcha xizmatlardan foydalanishingiz mumkin.",
+        parse_mode="HTML",
+        reply_markup=UI.main_menu(uid)
     )
-    await message.answer(text, reply_markup=Keyboards.main_menu(user_id), parse_mode="HTML")
-
-@dp.message(or_f(F.text == Config.BTN_HOME, F.text == Config.BTN_BACK))
-async def go_home(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("🏠 Asosiy menyudasiz.", reply_markup=Keyboards.main_menu(message.from_user.id))
 
 
 # ==========================================================================================
-# 🌐 8. SAYTGA KIRISH KODI (YANGILANGAN + TARIX)
+# 🌐 8. SAYTGA KIRISH KODI (WEB CODE)
 # ==========================================================================================
-@dp.message(F.text == Config.BTN_WEB)
+@dp.message(F.text == Design.BTN_WEB)
 async def web_code_menu(message: Message):
     user_id = message.from_user.id
-    code_row = DB.fetchone("SELECT * FROM web_codes WHERE uid=?", (user_id,))
+    row = await AsyncDB.fetchone("SELECT * FROM web_codes WHERE uid=?", (user_id,))
     
-    if code_row:
+    if row:
         text = (
             f"🌐 <b>VEB-SAYTGA KIRISH KODI</b>\n"
-            f"{Config.D_LINE}\n\n"
-            f"🔑 Shaxsiy Kod: <span class='tg-spoiler'><b>{code_row['code']}</b></span>\n"
-            f"📅 Yaratilgan: <b>{format_dt(code_row['created_at'])}</b>\n\n"
-            f"<i>💡 Kodni nusxalash uchun ustiga bosing. Maxfiylikni saqlang!</i>"
+            f"{Design.D_LINE}\n\n"
+            f"Sizning shaxsiy kodingiz: <span class='tg-spoiler'><b>{row['code']}</b></span>\n"
+            f"<i>(Nusxalash uchun ustiga bosing: <code>{row['code']}</code>)</i>\n\n"
+            f"📅 Yaratilgan: <b>{fmt_dt(row['created_at'])}</b>\n\n"
+            f"🛡 <i>Ushbu kodni maxfiy saqlang. Saytga kirishda ushbu koddan foydalanasiz.</i>"
         )
-        await message.answer(text, reply_markup=Keyboards.web_code(True), parse_mode="HTML")
+        await message.answer(text, reply_markup=UI.get_web_code_markup(True), parse_mode="HTML")
     else:
         text = (
-            f"🌐 <b>VEB-SAYTGA KIRISH</b>\n"
-            f"{Config.D_LINE}\n"
-            f"Sizda hali saytga kirish uchun maxsus 4 xonali kod mavjud emas. Quyidagi tugmani bosib yarating."
+            f"🌐 <b>VEB-SAYTGA INTEGRATSIYA</b>\n"
+            f"{Design.D_LINE}\n\n"
+            f"Sizda hali kirish kodi mavjud emas. Saytga ulanish uchun quyidagi tugmani bosib 4 xonali maxfiy kod yarating."
         )
-        await message.answer(text, reply_markup=Keyboards.web_code(False), parse_mode="HTML")
+        await message.answer(text, reply_markup=UI.get_web_code_markup(False), parse_mode="HTML")
 
-@dp.callback_query(F.data.startswith("web_"))
-async def web_code_actions(call: CallbackQuery):
+
+@dp.callback_query(F.data.startswith("code_"))
+async def handle_web_code_actions(call: CallbackQuery):
     action = call.data.split("_")[1]
     user_id = call.from_user.id
-    
+    now_iso = datetime.now().isoformat()
+
     if action == "generate":
-        if DB.fetchone("SELECT code FROM web_codes WHERE uid=?", (user_id,)):
+        existing = await AsyncDB.fetchone("SELECT code FROM web_codes WHERE uid=?", (user_id,))
+        if existing:
             return await call.answer("Kod allaqachon mavjud!", show_alert=True)
-        code = gen_code()
-        DB.execute("INSERT INTO web_codes (uid, code, created_at) VALUES (?,?,?)", (user_id, code, datetime.now().isoformat()))
-        await call.message.edit_text(
-            f"🎉 <b>KOD YARATILDI!</b>\n{Config.D_LINE}\n🔑 Kod: <code>{code}</code>",
-            reply_markup=Keyboards.web_code(True), parse_mode="HTML"
+            
+        while True:
+            new_code = gen_code()
+            check = await AsyncDB.fetchone("SELECT uid FROM web_codes WHERE code=?", (new_code,))
+            if not check: break
+            
+        await AsyncDB.execute(
+            "INSERT INTO web_codes (uid, code, created_at) VALUES (?, ?, ?)",
+            (user_id, new_code, now_iso)
         )
-        await call.answer()
+        await call.message.edit_text(
+            f"✅ <b>KOD YARATILDI!</b>\n{Design.D_LINE}\n🔑 Sizning kodingiz: <code>{new_code}</code>",
+            reply_markup=UI.get_web_code_markup(True), parse_mode="HTML"
+        )
         
     elif action == "regenerate":
-        code = gen_code()
-        DB.execute("REPLACE INTO web_codes (uid, code, created_at) VALUES (?,?,?)", (user_id, code, datetime.now().isoformat()))
-        await call.message.edit_text(
-            f"🔄 <b>KOD YANGILANDI!</b>\n{Config.D_LINE}\n🔑 Yangi Kod: <code>{code}</code>\n<i>Eski kod bekor qilindi.</i>",
-            reply_markup=Keyboards.web_code(True), parse_mode="HTML"
+        while True:
+            new_code = gen_code()
+            check = await AsyncDB.fetchone("SELECT uid FROM web_codes WHERE code=?", (new_code,))
+            if not check: break
+            
+        await AsyncDB.execute(
+            "UPDATE web_codes SET code=?, created_at=? WHERE uid=?",
+            (new_code, now_iso, user_id)
         )
-        await call.answer()
-        
+        await call.message.edit_text(
+            f"🔄 <b>KOD YANGILANDI!</b>\n{Design.D_LINE}\n🔑 Yangi kodingiz: <code>{new_code}</code>\n<i>Eski kod yaroqsiz holga keldi.</i>",
+            reply_markup=UI.get_web_code_markup(True), parse_mode="HTML"
+        )
+
     elif action == "delete":
-        DB.execute("DELETE FROM web_codes WHERE uid=?", (user_id,))
-        await call.message.edit_text("🗑 <b>KOD O'CHIRILDI!</b> Saytga kirish imkoniyati to'xtatildi.", reply_markup=Keyboards.web_code(False), parse_mode="HTML")
-        await call.answer()
-        
-    elif action == "history":
-        history = DB.fetchall("SELECT * FROM login_history WHERE uid=? ORDER BY login_time DESC LIMIT 5", (user_id,))
-        if not history:
-            return await call.answer("Tarix bo'sh. Siz hali saytga kirmagansiz.", show_alert=True)
-        
-        text = f"📜 <b>OXIRGI 5 TA KIRISH TARIXI:</b>\n{Config.D_LINE}\n"
-        for h in history:
-            status_ico = "✅" if h['status'] == 'success' else "❌"
-            text += f"{status_ico} <b>Sana:</b> {format_dt(h['login_time'])}\n🌐 <b>IP:</b> {h['ip_address']}\n{Config.S_LINE}\n"
-        
-        await call.message.answer(text, parse_mode="HTML")
-        await call.answer()
+        await AsyncDB.execute("DELETE FROM web_codes WHERE uid=?", (user_id,))
+        await call.message.edit_text(
+            f"🗑 <b>KOD O'CHIRILDI!</b>\n{Design.D_LINE}\nEndi bu profil orqali saytga kirib bo'lmaydi.",
+            reply_markup=UI.get_web_code_markup(False), parse_mode="HTML"
+        )
+    await call.answer()
 
 
 # ==========================================================================================
-# 👤 9. PROFIL VA SOZLAMALAR (YANGI)
+# 👤 9. FOYDALANUVCHI BO'LIMLARI (PROFIL, TARIX, SOZLAMALAR, FAQ)
 # ==========================================================================================
-@dp.message(F.text == Config.BTN_PROF)
+@dp.message(F.text == Design.BTN_PROF)
 async def view_profile(message: Message):
-    user_id = message.from_user.id
-    u = DB.fetchone("SELECT * FROM users WHERE uid=?", (user_id,))
-    c = DB.fetchone("SELECT code FROM web_codes WHERE uid=?", (user_id,))
-    
-    code_status = f"Faol (<code>{c['code']}</code>)" if c else "Mavjud emas"
+    u = await AsyncDB.fetchone("SELECT * FROM users WHERE uid=?", (message.from_user.id,))
+    if not u: return
+    c = await AsyncDB.fetchone("SELECT code FROM web_codes WHERE uid=?", (message.from_user.id,))
+    code_txt = f"<code>{c['code']}</code>" if c else "<i>Yo'q</i>"
     
     text = (
-        f"👤 <b>MENING KABINETIM</b>\n"
-        f"{Config.D_LINE}\n"
-        f"📛 <b>F.I.Sh:</b> {html.escape(u['fullname'])}\n"
-        f"🆔 <b>ID:</b> <code>{u['uid']}</code>\n"
-        f"📅 <b>Ro'yxatdan o'tgan:</b> {format_dt(u['joined_at'])}\n"
-        f"🔑 <b>Sayt kodi:</b> {code_status}\n"
-        f"🌟 <b>Yig'ilgan ballar:</b> {u['points']} ball\n"
+        f"👤 <b>SHAXSIY KABINET</b>\n{Design.S_LINE}\n\n"
+        f"🏷 F.I.Sh: <b>{html.escape(u['fullname'])}</b>\n"
+        f"🆔 ID Rqam: <code>{u['uid']}</code>\n"
+        f"📅 A'zo bo'lgan: <b>{fmt_dt(u['joined_at'])}</b>\n"
+        f"🌐 Web Kod: {code_txt}\n\n"
+        f"<i>Xavfsizligingiz o'z qo'lingizda.</i>"
     )
     await message.answer(text, parse_mode="HTML")
 
-@dp.message(F.text == Config.BTN_SETTINGS)
+
+@dp.message(F.text == Design.BTN_HISTORY)
+async def view_login_history(message: Message):
+    uid = message.from_user.id
+    history = await AsyncDB.fetchall(
+        "SELECT * FROM login_history WHERE uid=? ORDER BY login_time DESC LIMIT 5", (uid,)
+    )
+    
+    if not history:
+        text = f"📱 <b>KIRISH TARIXI</b>\n{Design.S_LINE}\n\nSiz hali saytga kirmagansiz."
+    else:
+        text = f"📱 <b>SO'NGGI 5 TA KIRISH TARIXI</b>\n{Design.S_LINE}\n\n"
+        for i, h in enumerate(history, 1):
+            status_ico = "🟢" if h['status'] == "SUCCESS" else "🔴"
+            text += (
+                f"{i}. {status_ico} <b>{fmt_dt(h['login_time'])}</b>\n"
+                f"   IP: <code>{h['ip_address']}</code>\n"
+                f"   Qurilma: <i>{html.escape(h['user_agent'][:25])}...</i>\n"
+            )
+            
+    await message.answer(text, parse_mode="HTML")
+
+
+@dp.message(F.text == Design.BTN_SETTINGS)
 async def view_settings(message: Message):
-    u = DB.fetchone("SELECT notifications FROM users WHERE uid=?", (message.from_user.id,))
-    text = f"⚙️ <b>SHAXSIY SOZLAMALAR</b>\n{Config.S_LINE}\nBu yerdan profil ma'lumotlarini tahrirlashingiz mumkin."
-    await message.answer(text, reply_markup=Keyboards.settings_menu(bool(u['notifications'])), parse_mode="HTML")
+    text = (
+        f"⚙️ <b>SOZLAMALAR</b>\n{Design.S_LINE}\n\n"
+        f"Profil ma'lumotlaringizni o'zgartirishingiz yoki bot haqida ma'lumot olishingiz mumkin."
+    )
+    await message.answer(text, reply_markup=UI.settings_markup(), parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("set_"))
-async def settings_actions(call: CallbackQuery, state: FSMContext):
+async def handle_settings_cb(call: CallbackQuery, state: FSMContext):
     action = call.data.split("_")[1]
-    user_id = call.from_user.id
     
-    if action == "name":
+    if action == "change":
         await state.set_state(Form.settings_name)
-        await call.message.answer("✏️ <b>Yangi Ism va Familiyangizni kiriting:</b>", reply_markup=Keyboards.just_back(), parse_mode="HTML")
-        await call.answer()
-        
-    elif action == "notifications":
-        u = DB.fetchone("SELECT notifications FROM users WHERE uid=?", (user_id,))
-        new_val = 0 if u['notifications'] == 1 else 1
-        DB.execute("UPDATE users SET notifications=? WHERE uid=?", (new_val, user_id))
-        await call.message.edit_reply_markup(reply_markup=Keyboards.settings_menu(bool(new_val)))
-        await call.answer("Holat o'zgardi!")
+        await call.message.edit_text(
+            "📝 <b>Yangi ism va familiyangizni kiriting:</b>\n<i>(Masalan: Jasur Karimov)</i>",
+            parse_mode="HTML"
+        )
+    elif action == "about":
+        await call.answer("A'lo Ta'lim Bot - Versiya 6.0 Premium", show_alert=True)
 
 @dp.message(Form.settings_name)
 async def save_new_name(message: Message, state: FSMContext):
     new_name = message.text.strip()
     if len(new_name) < 4:
-        return await message.answer("⚠️ Juda qisqa!")
+        return await message.answer("⚠️ Ism juda qisqa.")
         
-    DB.execute("UPDATE users SET fullname=? WHERE uid=?", (new_name, message.from_user.id))
+    await AsyncDB.execute("UPDATE users SET fullname=? WHERE uid=?", (new_name, message.from_user.id))
+    await message.answer(f"✅ Ismingiz <b>{html.escape(new_name)}</b> ga o'zgartirildi!", parse_mode="HTML")
     await state.clear()
-    await message.answer("✅ <b>Ismingiz muvaffaqiyatli yangilandi!</b>", reply_markup=Keyboards.main_menu(message.from_user.id), parse_mode="HTML")
 
 
-# ==========================================================================================
-# 👥 10. REFERAL DASTUR (YANGI)
-# ==========================================================================================
-@dp.message(F.text == Config.BTN_REF)
-async def referral_system(message: Message, bot: Bot):
-    user_id = message.from_user.id
-    bot_info = await bot.get_me()
-    ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
-    
-    my_refs = DB.fetchone("SELECT COUNT(*) as c FROM users WHERE referrer_id=?", (user_id,))['c']
-    top_refs = DB.fetchall("SELECT fullname, points FROM users ORDER BY points DESC LIMIT 5")
-    
+@dp.message(F.text == Design.BTN_FAQ)
+async def view_faq(message: Message):
     text = (
-        f"👥 <b>REFERAL DASTUR</b>\n"
-        f"{Config.D_LINE}\n\n"
-        f"Do'stlaringizni taklif qiling va ballar yig'ing!\n"
-        f"Har bir taklif qilingan do'st uchun <b>10 ball</b> beriladi.\n\n"
-        f"🔗 <b>Sizning taklif havolangiz:</b>\n<code>{ref_link}</code>\n\n"
-        f"📊 <b>Sizning natijangiz:</b>\n"
-        f"Taklif qilinganlar: <b>{my_refs} ta</b>\n"
-        f"{Config.S_LINE}\n"
-        f"🏆 <b>TOP 5 FOYDALANUVCHILAR:</b>\n"
+        f"📚 <b>KO'P SO'RALADIGAN SAVOLLAR (FAQ)</b>\n{Design.S_LINE}\n\n"
+        f"O'zingizni qiziqtirgan savolni tanlang:"
     )
-    
-    for i, r in enumerate(top_refs, 1):
-        medal = ["🥇", "🥈", "🥉", "🏅", "🏅"][i-1]
-        text += f"{medal} {html.escape(r['fullname'])} - {r['points']} ball\n"
-        
-    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+    await message.answer(text, reply_markup=UI.faq_markup(), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("faq_"))
+async def handle_faq_answer(call: CallbackQuery):
+    faq_id = call.data.split("_")[1]
+    answers = {
+        "1": "Saytga kirish uchun «🌐 Saytga kirish» tugmasidan kod oling va saytning login oynasiga kiriting.",
+        "2": "Agar kodingiz ishlamasa, u yangilangan yoki vaqti o'tgan bo'lishi mumkin. Yangi kod yarating.",
+        "3": "Sizning barcha ma'lumotlaringiz kuchli shifrlangan bazada saqlanadi va uchinchi shaxslarga berilmaydi.",
+        "4": "Asosiy menyudagi «🆘 Adminga murojaat» tugmasi orqali adminlarga to'g'ridan-to'g'ri xabar yuborishingiz mumkin."
+    }
+    await call.answer(answers.get(faq_id, "Noma'lum xatolik"), show_alert=True)
 
 
 # ==========================================================================================
-# 📚 11. FAQ VA FIKR BİLDIRISH (YANGI)
+# 🆘 10. SUPPORT TIZIMI (FOYDALANUVCHIDAN ADMINGA)
 # ==========================================================================================
-@dp.message(F.text == Config.BTN_FAQ)
-async def show_faq(message: Message):
-    text = (
-        f"📚 <b>KO'P SO'RALADIGAN SAVOLLAR (FAQ)</b>\n"
-        f"{Config.D_LINE}\n\n"
-        f"🔹 <b>Qanday qilib saytga kirsam bo'ladi?</b>\n"
-        f"<i>Javob: '🌐 Saytga kirish' tugmasini bosing va o'zingizga xos 4 xonali kod yarating. So'ng saytga o'sha kodni kiriting.</i>\n\n"
-        f"🔹 <b>Kodni begonalarga bersam nima bo'ladi?</b>\n"
-        f"<i>Javob: Profilingizga boshqalar kirib olishi mumkin. Bunday holatda zudlik bilan kodni '🔄 Yangilash' tugmasi orqali almashtiring.</i>\n\n"
-        f"🔹 <b>Ballar nima uchun kerak?</b>\n"
-        f"<i>Javob: Eng ko'p ball yig'gan a'zolar uchun kelgusida platformamiz tomonidan maxsus chegirmalar va sovg'alar taqdim etiladi.</i>\n\n"
-        f"🔹 <b>Kanalga a'zo bo'lish majburiymi?</b>\n"
-        f"<i>Javob: Ha, tizimdan foydalanish xavfsizligini ta'minlash maqsadida obuna talab qilinadi.</i>"
-    )
-    await message.answer(text, parse_mode="HTML")
-
-@dp.message(F.text == Config.BTN_FEEDBACK)
-async def ask_feedback(message: Message):
-    text = (
-        f"⭐ <b>TIZIMNI BAHOLASH</b>\n"
-        f"{Config.S_LINE}\n"
-        f"Bizning platformamiz ishlashidan qanchalik qoniqdingiz?\n"
-        f"Iltimos, yulduzchalar orqali baho bering:"
-    )
-    await message.answer(text, reply_markup=Keyboards.stars_keyboard(), parse_mode="HTML")
-
-@dp.callback_query(F.data.startswith("star_"))
-async def process_star(call: CallbackQuery, state: FSMContext):
-    stars = int(call.data.split("_")[1])
-    await state.update_data(stars=stars)
-    await state.set_state(Form.feedback_msg)
-    
-    await call.message.edit_text(
-        f"Siz tizimga <b>{stars} yulduz</b> berdingiz! ⭐\n\n"
-        f"✍️ <i>Endi platforma haqida o'z fikr-mulohazangizni yoki taklifingizni yozib yuboring:</i>",
-        parse_mode="HTML"
-    )
-
-@dp.message(Form.feedback_msg)
-async def save_feedback(message: Message, state: FSMContext):
-    data = await state.get_data()
-    stars = data.get("stars", 5)
-    comment = message.text or ""
-    
-    DB.execute(
-        "INSERT INTO feedbacks (uid, stars, comment, created_at) VALUES (?,?,?,?)",
-        (message.from_user.id, stars, comment, datetime.now().isoformat())
-    )
-    
-    await state.clear()
-    await message.answer("✅ <b>Katta rahmat!</b> Fikr-mulohazangiz adminga yetkazildi. Biz har doim rivojlanishga harakat qilamiz!", parse_mode="HTML")
-
-
-# ==========================================================================================
-# 🆘 12. ADMIN BILAN ALOQA (SUPPORT)
-# ==========================================================================================
-@dp.message(F.text == Config.BTN_HELP)
-async def start_support(message: Message, state: FSMContext):
+@dp.message(F.text == Design.BTN_HELP)
+async def ask_support(message: Message, state: FSMContext):
     await state.set_state(Form.support_msg)
     await message.answer(
-        f"📬 <b>ADMINISTRATORGA XABAR YUBORISH</b>\n"
-        f"{Config.S_LINE}\n"
-        f"Savol, shikoyat yoki taklifingizni bitta xabarda batafsil yozib yuboring.",
-        reply_markup=Keyboards.just_back(), parse_mode="HTML"
+        f"📬 <b>ADMINISTRATSIYA BILAN ALOQA</b>\n{Design.S_LINE}\n\n"
+        f"Savol, taklif yoki muammoingizni shu yerga yozib yuboring. Adminlarimiz eng qisqa vaqt ichida javob berishadi.\n\n"
+        f"<i>Bekor qilish uchun «⬅️ Orqaga» tugmasini bosing.</i>",
+        reply_markup=UI.back_btn(), parse_mode="HTML"
     )
 
 @dp.message(Form.support_msg)
-async def send_support(message: Message, state: FSMContext, bot: Bot):
-    text = message.text or ""
-    if len(text) < 5:
-        return await message.answer("⚠️ Xabar juda qisqa!")
+async def receive_support_msg(message: Message, state: FSMContext, bot: Bot):
+    if message.text == Design.BTN_BACK:
+        await state.clear()
+        return await cmd_start(message, state, bot)
         
-    mid = DB.execute(
-        "INSERT INTO support_messages (uid, message_text, created_at) VALUES (?,?,?)",
+    text = message.text or ""
+    if len(text) < 5: return await message.answer("⚠️ Xabar juda qisqa!")
+
+    mid = await AsyncDB.execute_return_id(
+        "INSERT INTO support_messages (uid, message_text, created_at) VALUES (?, ?, ?)",
         (message.from_user.id, text, datetime.now().isoformat())
     )
-    
-    kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="✍️ Javob Yozish", callback_data=f"admreply_{message.from_user.id}_{mid}"))
-    
-    adm_text = (
-        f"🆕 <b>YANGI MUROJAAT #{mid}</b>\n"
-        f"{Config.S_LINE}\n"
-        f"👤 <b>Kimdan:</b> {html.escape(message.from_user.full_name)} (<code>{message.from_user.id}</code>)\n"
+
+    # Adminga yuborish
+    admin_text = (
+        f"🆕 <b>YANGI MUROJAAT #{mid}</b>\n{Design.S_LINE}\n"
+        f"👤 Kimdan: <b>{html.escape(message.from_user.full_name)}</b>\n"
+        f"🆔 ID: <code>{message.from_user.id}</code>\n\n"
         f"💬 <b>Matn:</b>\n<i>{html.escape(text)}</i>"
     )
     
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text="✍️ Javob yozish", callback_data=f"adm_reply_{message.from_user.id}_{mid}"))
+    
     try:
-        await bot.send_message(Config.ADMIN_ID, adm_text, reply_markup=kb.as_markup(), parse_mode="HTML")
-    except:
-        pass
-        
+        await bot.send_message(Config.ADMIN_ID, admin_text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Adminga xabar yuborishda xato: {e}")
+
+    await message.answer("✅ Murojaatingiz yuborildi. Javobni kuting.", reply_markup=UI.main_menu(message.from_user.id))
     await state.clear()
-    await message.answer("✅ Xabaringiz yuborildi. Tez orada javob olasiz.", reply_markup=Keyboards.main_menu(message.from_user.id), parse_mode="HTML")
 
 
 # ==========================================================================================
-# 🛠 13. ADMIN PANEL VA STATISTIKA (YANGILANGAN)
+# 👑 11. ADMIN PANEL VA FUNKSIYALARI
 # ==========================================================================================
-@dp.message(F.text == Config.BTN_ADM_PANEL)
-async def admin_panel(message: Message):
+@dp.message(F.text == Design.BTN_ADM)
+async def admin_portal(message: Message):
     if message.from_user.id != Config.ADMIN_ID: return
     
-    sys_status = "🟢 ONLINE" if DB.get_setting("maintenance") == "0" else "🔴 MAINTENANCE"
-    
     text = (
-        f"👑 <b>BOSH ADMIN DASHBOARD</b>\n"
-        f"{Config.D_LINE}\n"
-        f"Tizim Holati: <b>{sys_status}</b>\n"
-        f"Server Vaqti: <b>{datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</b>\n\n"
-        f"<i>Quyidagi kengaytirilgan funksiyalardan birini tanlang:</i>"
+        f"🛠 <b>BOSH ADMIN PORTALI</b>\n{Design.D_LINE}\n\n"
+        f"Hurmatli Admin, tizim to'liq ishchi holatda. Kerakli buyruqni tanlang:"
     )
-    await message.answer(text, reply_markup=Keyboards.admin_menu(), parse_mode="HTML")
+    await message.answer(text, reply_markup=UI.admin_menu(), parse_mode="HTML")
 
-@dp.message(F.text == Config.BTN_ADM_STATS)
+# 11.1 Murojaatga javob berish
+@dp.callback_query(F.data.startswith("adm_reply_"))
+async def start_admin_reply(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != Config.ADMIN_ID: return
+    
+    _, _, target_id, mid = call.data.split("_")
+    await state.update_data(target_id=target_id, mid=mid)
+    await state.set_state(Form.adm_reply)
+    
+    await call.message.answer(
+        f"📝 <b>Foydalanuvchiga (ID: {target_id}) javob yozing:</b>\n<i>Bekor qilish uchun «⬅️ Orqaga» ni bosing.</i>",
+        reply_markup=UI.back_btn(), parse_mode="HTML"
+    )
+    await call.answer()
+
+@dp.message(Form.adm_reply)
+async def send_admin_reply(message: Message, state: FSMContext, bot: Bot):
+    if message.text == Design.BTN_BACK:
+        await state.clear()
+        return await message.answer("Bekor qilindi.", reply_markup=UI.admin_menu())
+
+    data = await state.get_data()
+    
+    try:
+        user_msg = (
+            f"📩 <b>ADMINISTRATSIYADAN JAVOB:</b>\n{Design.S_LINE}\n\n"
+            f"{html.escape(message.text)}\n\n"
+            f"<i>Sizning #{data['mid']}-sonli murojaatingizga javoban.</i>"
+        )
+        await bot.send_message(int(data['target_id']), user_msg, parse_mode="HTML")
+        await AsyncDB.execute("UPDATE support_messages SET is_replied=1 WHERE mid=?", (data['mid'],))
+        await message.answer("✅ Xabar muvaffaqiyatli yetkazildi!", reply_markup=UI.admin_menu())
+    except Exception as e:
+        await message.answer(f"❌ Yuborib bo'lmadi (Bloklagan bo'lishi mumkin). Xato: {e}", reply_markup=UI.admin_menu())
+    
+    await state.clear()
+
+
+# 11.2 Kengaytirilgan Statistika
+@dp.message(F.text == Design.ADM_STATS)
 async def admin_stats(message: Message):
     if message.from_user.id != Config.ADMIN_ID: return
     
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    
-    tot_users = DB.fetchone("SELECT COUNT(*) as c FROM users")['c']
-    new_today = DB.fetchone("SELECT COUNT(*) as c FROM users WHERE joined_at LIKE ?", (f"{today_str}%",))['c']
-    tot_codes = DB.fetchone("SELECT COUNT(*) as c FROM web_codes")['c']
-    tot_logins = DB.fetchone("SELECT COUNT(*) as c FROM login_history")['c']
-    logins_today = DB.fetchone("SELECT COUNT(*) as c FROM login_history WHERE login_time LIKE ?", (f"{today_str}%",))['c']
-    avg_stars = DB.fetchone("SELECT AVG(stars) as a FROM feedbacks")['a'] or 0.0
+    u_all = (await AsyncDB.fetchone("SELECT COUNT(*) as c FROM users"))['c']
+    u_ban = (await AsyncDB.fetchone("SELECT COUNT(*) as c FROM users WHERE is_banned=1"))['c']
+    codes = (await AsyncDB.fetchone("SELECT COUNT(*) as c FROM web_codes"))['c']
+    msgs = (await AsyncDB.fetchone("SELECT COUNT(*) as c FROM support_messages"))['c']
+    logins = (await AsyncDB.fetchone("SELECT COUNT(*) as c FROM login_history WHERE status='SUCCESS'"))['c']
     
     text = (
-        f"📊 <b>KENGAYTIRILGAN STATISTIKA</b>\n"
-        f"{Config.D_LINE}\n\n"
-        f"👥 <b>Foydalanuvchilar:</b>\n"
-        f"├ Jami a'zolar: <b>{tot_users}</b>\n"
-        f"└ Bugun qo'shilganlar: <b>{new_today}</b>\n\n"
-        f"🌐 <b>Sayt Aktivligi:</b>\n"
-        f"├ Berilgan kodlar: <b>{tot_codes}</b>\n"
-        f"├ Jami kirishlar: <b>{tot_logins} marta</b>\n"
-        f"└ Bugungi kirishlar: <b>{logins_today} marta</b>\n\n"
-        f"⭐ <b>O'rtacha baho:</b> {avg_stars:.1f} / 5.0"
+        f"📊 <b>KENGAYTIRILGAN STATISTIKA</b>\n{Design.D_LINE}\n\n"
+        f"👥 Umumiy foydalanuvchilar: <b>{u_all} ta</b>\n"
+        f"🚫 Bloklanganlar: <b>{u_ban} ta</b>\n"
+        f"🔑 Faol Web Kodlar: <b>{codes} ta</b>\n"
+        f"💬 Murojaatlar soni: <b>{msgs} ta</b>\n"
+        f"🌐 Saytga umumiy kirishlar: <b>{logins} marta</b>\n\n"
+        f"<i>Ma'lumotlar real vaqtda olingan.</i>"
     )
     await message.answer(text, parse_mode="HTML")
 
 
-# ==========================================================================================
-# 📢 14. ADMIN BROADCAST (RASM/VIDEO BILAN)
-# ==========================================================================================
-@dp.message(F.text == Config.BTN_ADM_BROADCAST)
-async def broadcast_start(message: Message, state: FSMContext):
+# 11.3 Shaxsiy Xabar Yuborish (Direct Message)
+@dp.message(F.text == Design.ADM_DIRECT)
+async def direct_msg_start(message: Message, state: FSMContext):
     if message.from_user.id != Config.ADMIN_ID: return
-    await state.set_state(Form.adm_broadcast_msg)
-    await message.answer(
-        "📢 <b>Xabarni yuboring:</b>\n\n(Matn, Rasm, Video yoki Hujjat yuborishingiz mumkin. HTML teglari ishlaydi)",
-        reply_markup=Keyboards.just_back(), parse_mode="HTML"
+    await state.set_state(Form.adm_direct_id)
+    await message.answer("🆔 Foydalanuvchi ID raqamini kiriting:", reply_markup=UI.back_btn())
+
+@dp.message(Form.adm_direct_id)
+async def direct_msg_id(message: Message, state: FSMContext):
+    if message.text == Design.BTN_BACK:
+        await state.clear()
+        return await admin_portal(message)
+        
+    if not message.text.isdigit(): return await message.answer("Faqat raqam kiriting!")
+    
+    await state.update_data(target_id=int(message.text))
+    await state.set_state(Form.adm_direct_msg)
+    await message.answer("📝 Xabar matnini kiriting:")
+
+@dp.message(Form.adm_direct_msg)
+async def direct_msg_send(message: Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    try:
+        await bot.send_message(data['target_id'], f"✉️ <b>Shaxsiy xabar:</b>\n\n{message.text}", parse_mode="HTML")
+        await message.answer("✅ Xabar muvaffaqiyatli yuborildi!", reply_markup=UI.admin_menu())
+    except Exception as e:
+        await message.answer(f"❌ Xatolik yuz berdi: {e}", reply_markup=UI.admin_menu())
+    await state.clear()
+
+
+# 11.4 Ban Tizimi
+@dp.message(F.text == Design.ADM_BAN_SYS)
+async def ban_system_menu(message: Message):
+    if message.from_user.id != Config.ADMIN_ID: return
+    await message.answer("🚫 <b>BAN TIZIMI BOSHQARUVI</b>", reply_markup=UI.admin_ban_markup(), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("admin_do_"))
+async def handle_ban_action(call: CallbackQuery, state: FSMContext):
+    action = call.data.split("_")[2]
+    if action == "ban":
+        await state.set_state(Form.adm_ban_id)
+        await call.message.answer("🚫 Ban qilinadigan foydalanuvchi ID sini kiriting:", reply_markup=UI.back_btn())
+    elif action == "unban":
+        await state.set_state(Form.adm_unban_id)
+        await call.message.answer("✅ Bandan olinadigan ID ni kiriting:", reply_markup=UI.back_btn())
+    await call.answer()
+
+@dp.message(or_f(Form.adm_ban_id, Form.adm_unban_id))
+async def execute_ban_unban(message: Message, state: FSMContext):
+    if message.text == Design.BTN_BACK:
+        await state.clear()
+        return await admin_portal(message)
+    
+    uid = message.text.strip()
+    if not uid.isdigit(): return await message.answer("Noto'g'ri ID!")
+    
+    current_state = await state.get_state()
+    is_ban = 1 if current_state == Form.adm_ban_id.state else 0
+    action_text = "bloklandi 🚫" if is_ban else "bandan olindi ✅"
+
+    user = await AsyncDB.fetchone("SELECT * FROM users WHERE uid=?", (uid,))
+    if not user:
+        return await message.answer("❌ Bunday foydalanuvchi topilmadi.")
+
+    await AsyncDB.execute("UPDATE users SET is_banned=? WHERE uid=?", (is_ban, uid))
+    
+    if is_ban:
+        # Kodini ham o'chiramiz xavfsizlik uchun
+        await AsyncDB.execute("DELETE FROM web_codes WHERE uid=?", (uid,))
+
+    await message.answer(f"Foydalanuvchi muvaffaqiyatli {action_text}!", reply_markup=UI.admin_menu())
+    await state.clear()
+
+
+# 11.5 Excel/CSV Eksport (Ma'lumotlarni yuklash)
+@dp.message(F.text == Design.ADM_EXPORT)
+async def export_database(message: Message):
+    if message.from_user.id != Config.ADMIN_ID: return
+    await message.answer("⏳ <i>Ma'lumotlar generatsiya qilinmoqda...</i>", parse_mode="HTML")
+    
+    users = await AsyncDB.fetchall("SELECT uid, fullname, username, joined_at, is_banned FROM users")
+    
+    # Xotirada CSV fayl yaratish
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["uid", "fullname", "username", "joined_at", "is_banned"])
+    writer.writeheader()
+    writer.writerows(users)
+    
+    # Faylni baytlarga o'tkazish
+    output.seek(0)
+    file_bytes = output.read().encode('utf-8')
+    document = BufferedInputFile(file_bytes, filename=f"users_export_{datetime.now().strftime('%d_%m')}.csv")
+    
+    await message.answer_document(
+        document=document,
+        caption="📥 Foydalanuvchilar bazasi yuklab olindi (CSV formatida)."
     )
 
-@dp.message(Form.adm_broadcast_msg)
-async def broadcast_preview(message: Message, state: FSMContext):
+
+# 11.6 Majburiy Obunalarni Boshqarish
+@dp.message(F.text == Design.ADM_CHANNELS)
+async def manage_channels(message: Message):
     if message.from_user.id != Config.ADMIN_ID: return
+    await message.answer("📢 <b>OBUNALARNI BOSHQARISH</b>", reply_markup=UI.admin_channel_markup(), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("admin_ch_"))
+async def handle_channel_actions(call: CallbackQuery, state: FSMContext):
+    action = call.data.split("_")[2]
     
-    # Xabarni saqlab qolish
-    await state.update_data(msg_id=message.message_id, from_chat=message.chat.id)
-    await state.set_state(Form.adm_broadcast_confirm)
+    if action == "add":
+        await state.set_state(Form.adm_add_channel_data)
+        await call.message.answer(
+            "➕ <b>Kanal qo'shish:</b>\nQuyidagi formatda yuboring:\n`@kanal_id | Kanal Nomi | https://t.me/kanal_link`",
+            parse_mode="Markdown", reply_markup=UI.back_btn()
+        )
+    elif action == "list":
+        chans = await AsyncDB.fetchall("SELECT * FROM channels")
+        if not chans:
+            await call.message.answer("Kanallar yo'q.")
+        else:
+            txt = "📋 <b>Mavjud Kanallar:</b>\n\n"
+            for c in chans:
+                txt += f"ID: {c['channel_id']} | Nomi: {c['channel_name']}\n"
+            await call.message.answer(txt, parse_mode="HTML")
+    elif action == "del":
+        await call.message.answer("O'chirish formati hali qo'shilmadi (xavfsizlik uchun bazadan tozalash tavsiya etiladi).")
+    await call.answer()
+
+@dp.message(Form.adm_add_channel_data)
+async def save_new_channel(message: Message, state: FSMContext):
+    if message.text == Design.BTN_BACK:
+        await state.clear()
+        return await admin_portal(message)
+        
+    try:
+        cid, cname, curl = [x.strip() for x in message.text.split("|")]
+        await AsyncDB.execute(
+            "INSERT INTO channels (channel_id, channel_name, url) VALUES (?,?,?)",
+            (cid, cname, curl)
+        )
+        await message.answer("✅ Kanal muvaffaqiyatli qo'shildi!", reply_markup=UI.admin_menu())
+    except Exception:
+        await message.answer("❌ Format xato. Qaytadan urinib ko'ring.")
+    finally:
+        await state.clear()
+
+
+# 11.7 Barchaga xabar yuborish (Broadcast - Mukammallashtirilgan)
+@dp.message(F.text == Design.ADM_BROADCAST)
+async def broadcast_start(message: Message, state: FSMContext):
+    if message.from_user.id != Config.ADMIN_ID: return
+    await state.set_state(Form.adm_bc_text)
+    await message.answer("📢 Xabar matnini kiriting (HTML formatida ham yozish mumkin):", reply_markup=UI.back_btn())
+
+@dp.message(Form.adm_bc_text)
+async def broadcast_preview(message: Message, state: FSMContext):
+    if message.text == Design.BTN_BACK:
+        await state.clear()
+        return await admin_portal(message)
+        
+    await state.update_data(bc_text=message.text)
+    await state.set_state(Form.adm_bc_confirm)
     
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text="✅ YUBORISH", callback_data="bc_send"),
-        InlineKeyboardButton(text="❌ BEKOR QILISH", callback_data="bc_cancel")
+        InlineKeyboardButton(text="✅ Yuborish", callback_data="bc_send"),
+        InlineKeyboardButton(text="❌ Bekor qilish", callback_data="bc_cancel")
     )
     
-    await message.copy_to(message.chat.id, reply_markup=kb.as_markup())
-    await message.answer("👀 <b>Yuqorida xabarning ko'rinishi. Yuborishni tasdiqlaysizmi?</b>", parse_mode="HTML")
+    await message.answer(
+        f"👀 <b>PREVIEW:</b>\n\n{message.text}\n\n<i>Shu xabarni hamma a'zolarga yuborasizmi?</i>",
+        reply_markup=kb.as_markup(), parse_mode="HTML"
+    )
 
-@dp.callback_query(F.data.startswith("bc_"), Form.adm_broadcast_confirm)
+@dp.callback_query(F.data.startswith("bc_"), Form.adm_bc_confirm)
 async def broadcast_action(call: CallbackQuery, state: FSMContext, bot: Bot):
-    action = call.data.split("_")[1]
-    if action == "cancel":
+    if call.data == "bc_cancel":
         await state.clear()
-        return await call.message.edit_text("🚫 Bekor qilindi.")
+        await call.message.edit_text("❌ Bekor qilindi.")
+        return await call.answer()
         
-    await call.message.edit_text("🔄 <i>Xabar yuborilmoqda, jarayon boshlandi...</i>", parse_mode="HTML")
-    
     data = await state.get_data()
-    msg_id = data['msg_id']
-    from_chat = data['from_chat']
+    msg_text = data['bc_text']
     
-    users = DB.fetchall("SELECT uid FROM users WHERE is_banned=0")
+    await call.message.edit_text("🔄 Xabar barchaga yuborilmoqda, tizimni yopmang...")
+    
+    users = await AsyncDB.fetchall("SELECT uid FROM users WHERE is_banned=0")
     success, fail = 0, 0
     
     for u in users:
         try:
-            await bot.copy_message(chat_id=u['uid'], from_chat_id=from_chat, message_id=msg_id)
+            await bot.send_message(u['uid'], msg_text, parse_mode="HTML")
             success += 1
-            await asyncio.sleep(0.05)
-        except:
+            await asyncio.sleep(0.04) # Spam blockni oldini olish
+        except Exception:
             fail += 1
-            
+
     await call.message.answer(
-        f"✅ <b>Xabar yetkazish yakunlandi!</b>\n\n"
-        f"🟢 Muvaffaqiyatli: <b>{success}</b>\n"
-        f"🔴 Bloklaganlar: <b>{fail}</b>",
-        reply_markup=Keyboards.admin_menu(), parse_mode="HTML"
+        f"✅ <b>Eshittirish yakunlandi!</b>\n"
+        f"🟢 Yetkazildi: <b>{success}</b>\n🔴 Xatolik/Blok: <b>{fail}</b>",
+        reply_markup=UI.admin_menu(), parse_mode="HTML"
     )
     await state.clear()
 
 
 # ==========================================================================================
-# 👥 15. FOYDALANUVCHILARNI BOSHQARISH VA EKSPORT
+# 🌐 12. WEB API SERVER (AIOHTTP) - KUCHAYTIRILGAN
 # ==========================================================================================
-@dp.message(F.text == Config.BTN_ADM_USERS)
-async def manage_users(message: Message, state: FSMContext):
-    if message.from_user.id != Config.ADMIN_ID: return
-    await state.set_state(Form.adm_manage_user)
-    await message.answer("🔍 <b>Foydalanuvchi ID raqamini kiriting:</b>", reply_markup=Keyboards.just_back(), parse_mode="HTML")
+async def handle_root(request):
+    return web.Response(text="A'lo Ta'lim API Serveri faol! Barcha xizmatlar barqaror ishlamoqda.")
 
-@dp.message(Form.adm_manage_user)
-async def user_details(message: Message, state: FSMContext):
-    if message.from_user.id != Config.ADMIN_ID: return
-    try:
-        uid = int(message.text.strip())
-    except:
-        return await message.answer("⚠️ ID raqamdan iborat bo'lishi kerak!")
-        
-    u = DB.fetchone("SELECT * FROM users WHERE uid=?", (uid,))
-    if not u:
-        return await message.answer("❌ Bunday foydalanuvchi topilmadi!")
-        
-    kb = InlineKeyboardBuilder()
-    if u['is_banned']:
-        kb.row(InlineKeyboardButton(text="🔓 BANDAN OLISH", callback_data=f"unban_{uid}"))
-    else:
-        kb.row(InlineKeyboardButton(text="🔒 BAN QILISH", callback_data=f"ban_{uid}"))
-    kb.row(InlineKeyboardButton(text="🗑 KODINI O'CHIRISH", callback_data=f"delcode_{uid}"))
-    
-    text = (
-        f"👤 <b>FOYDALANUVCHI PROFILI</b>\n"
-        f"{Config.D_LINE}\n"
-        f"ID: <code>{u['uid']}</code>\n"
-        f"Ism: {html.escape(u['fullname'])}\n"
-        f"Username: @{u['username']}\n"
-        f"Ball: {u['points']}\n"
-        f"Holat: <b>{'🔴 BANNED' if u['is_banned'] else '🟢 ACTIVE'}</b>"
-    )
-    await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
-    await state.clear()
-
-@dp.callback_query(F.data.startswith(("ban_", "unban_", "delcode_")))
-async def user_actions_cb(call: CallbackQuery):
-    action, uid = call.data.split("_")
-    uid = int(uid)
-    
-    if action == "ban":
-        DB.execute("UPDATE users SET is_banned=1 WHERE uid=?", (uid,))
-        await call.answer("Foydalanuvchi bloklandi!", show_alert=True)
-    elif action == "unban":
-        DB.execute("UPDATE users SET is_banned=0 WHERE uid=?", (uid,))
-        await call.answer("Blokdan olindi!", show_alert=True)
-    elif action == "delcode":
-        DB.execute("DELETE FROM web_codes WHERE uid=?", (uid,))
-        await call.answer("Kodi o'chirildi!", show_alert=True)
-        
-    await call.message.delete()
-
-@dp.message(F.text == Config.BTN_ADM_EXPORT)
-async def export_db(message: Message):
-    if message.from_user.id != Config.ADMIN_ID: return
-    
-    await message.answer("⏳ <i>Ma'lumotlar eksport qilinmoqda...</i>", parse_mode="HTML")
-    
-    users = DB.fetchall("SELECT uid, fullname, username, joined_at, points FROM users")
-    
-    output = StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['ID', 'Full Name', 'Username', 'Joined At', 'Points'])
-    for u in users:
-        writer.writerow([u['uid'], u['fullname'], u['username'], u['joined_at'], u['points']])
-        
-    csv_bytes = output.getvalue().encode('utf-8')
-    document = BufferedInputFile(csv_bytes, filename=f"users_export_{datetime.now().strftime('%Y%m%d')}.csv")
-    
-    await message.answer_document(document, caption="🗂 <b>Barcha foydalanuvchilar ro'yxati (CSV)</b>", parse_mode="HTML")
-
-
-# ==========================================================================================
-# ⚙️ 16. KANALLAR VA TIZIM SOZLAMALARI (YANGI)
-# ==========================================================================================
-@dp.message(F.text == Config.BTN_ADM_CHANNELS)
-async def manage_channels(message: Message):
-    if message.from_user.id != Config.ADMIN_ID: return
-    
-    channels = DB.fetchall("SELECT * FROM channels")
-    kb = InlineKeyboardBuilder()
-    
-    text = f"📢 <b>MAJBURIY OBUNA KANALLARI</b>\n{Config.S_LINE}\n\n"
-    if not channels:
-        text += "<i>Hozircha kanallar qo'shilmagan.</i>"
-    else:
-        for ch in channels:
-            text += f"▪️ {ch['channel_name']} ({ch['channel_id']})\n"
-            kb.row(InlineKeyboardButton(text=f"🗑 O'chirish: {ch['channel_name']}", callback_data=f"delch_{ch['id']}"))
-            
-    kb.row(InlineKeyboardButton(text="➕ Yangi Kanal Qo'shish", callback_data="add_channel"))
-    await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
-
-@dp.callback_query(F.data == "add_channel")
-async def add_ch_step1(call: CallbackQuery, state: FSMContext):
-    await state.set_state(Form.adm_add_channel_name)
-    await call.message.edit_text("✏️ <b>Kanalning chiroyli nomini kiriting:</b>\n<i>(Masalan: 📢 Rasmiy Kanal)</i>", parse_mode="HTML")
-
-@dp.message(Form.adm_add_channel_name)
-async def add_ch_step2(message: Message, state: FSMContext):
-    await state.update_data(ch_name=message.text)
-    await state.set_state(Form.adm_add_channel_id)
-    await message.answer("🆔 <b>Kanalning ID yoki Usernameni kiriting:</b>\n<i>(Masalan: @alo_math yoki -100123456)</i>\n⚠️ Diqqat: Bot o'sha kanalda admin bo'lishi shart!", parse_mode="HTML")
-
-@dp.message(Form.adm_add_channel_id)
-async def add_ch_step3(message: Message, state: FSMContext):
-    data = await state.get_data()
-    ch_name = data['ch_name']
-    ch_id = message.text.strip()
-    
-    DB.execute("INSERT INTO channels (channel_id, channel_name) VALUES (?,?)", (ch_id, ch_name))
-    await state.clear()
-    await message.answer("✅ <b>Kanal muvaffaqiyatli qo'shildi!</b>", parse_mode="HTML")
-
-@dp.callback_query(F.data.startswith("delch_"))
-async def del_ch_action(call: CallbackQuery):
-    chid = int(call.data.split("_")[1])
-    DB.execute("DELETE FROM channels WHERE id=?", (chid,))
-    await call.answer("Kanal o'chirildi!", show_alert=True)
-    await call.message.delete()
-
-@dp.message(F.text == Config.BTN_ADM_SETTINGS)
-async def sys_settings(message: Message):
-    if message.from_user.id != Config.ADMIN_ID: return
-    
-    m_mode = DB.get_setting("maintenance")
-    kb = InlineKeyboardBuilder()
-    if m_mode == "1":
-        kb.row(InlineKeyboardButton(text="🟢 NORMAL REJIMGA QAYTARISH", callback_data="toggle_m_0"))
-    else:
-        kb.row(InlineKeyboardButton(text="🔴 MAINTENANCE YOQISH", callback_data="toggle_m_1"))
-        
-    text = (
-        f"⚙️ <b>TIZIM SOZLAMALARI</b>\n{Config.S_LINE}\n"
-        f"Joriy rejim: <b>{'🔴 TEXNIK ISHLAR (Maintenance)' if m_mode == '1' else '🟢 NORMAL'}</b>\n\n"
-        f"<i>Texnik ishlar rejimi yoqilsa, oddiy foydalanuvchilar botdan foydalana olmaydi.</i>"
-    )
-    await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
-
-@dp.callback_query(F.data.startswith("toggle_m_"))
-async def toggle_maintenance(call: CallbackQuery):
-    val = call.data.split("_")[2]
-    DB.set_setting("maintenance", val)
-    await call.answer("Rejim o'zgartirildi!", show_alert=True)
-    await call.message.delete()
-
-
-# ==========================================================================================
-# 🔐 17. ADMIN - FEEDBACKS VA SECURITY (YANGI)
-# ==========================================================================================
-@dp.message(F.text == Config.BTN_ADM_FEEDBACKS)
-async def view_feedbacks(message: Message):
-    if message.from_user.id != Config.ADMIN_ID: return
-    
-    feedbacks = DB.fetchall("SELECT f.*, u.fullname FROM feedbacks f JOIN users u ON f.uid = u.uid ORDER BY fid DESC LIMIT 10")
-    if not feedbacks:
-        return await message.answer("📭 Fikrlar mavjud emas.")
-        
-    text = f"⭐ <b>OXIRGI 10 TA FIKR-MULOHAZA</b>\n{Config.D_LINE}\n"
-    for f in feedbacks:
-        stars_str = "⭐" * f['stars']
-        text += f"👤 {html.escape(f['fullname'])} | {stars_str}\n💬 <i>{html.escape(f['comment'])}</i>\n📅 {format_dt(f['created_at'])}\n{Config.S_LINE}\n"
-        
-    await message.answer(text, parse_mode="HTML")
-
-@dp.message(F.text == Config.BTN_ADM_SECURITY)
-async def security_menu(message: Message):
-    if message.from_user.id != Config.ADMIN_ID: return
-    
-    kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text="⚠️ BARCHA KODLARNI BEKOR QILISH", callback_data="wipe_all_codes"))
-    
-    text = (
-        f"🔐 <b>XAVFSIZLIK MARKAZI</b>\n{Config.S_LINE}\n"
-        f"Agar tizimga xujum uyushtirilsa yoki barcha foydalanuvchilarni saytdan chiqarib yuborish kerak bo'lsa, "
-        f"ushbu tugma orqali barcha faol veb-kodlarni bekor qilishingiz mumkin."
-    )
-    await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
-
-@dp.callback_query(F.data == "wipe_all_codes")
-async def wipe_codes(call: CallbackQuery):
-    DB.execute("DELETE FROM web_codes")
-    await call.answer("✅ Barcha kodlar muvaffaqiyatli o'chirildi!", show_alert=True)
-    await call.message.delete()
-
-
-# ==========================================================================================
-# 💬 18. ADMIN - SUPPORT JAVOB BERISH
-# ==========================================================================================
-@dp.callback_query(F.data.startswith("admreply_"))
-async def support_reply_start(call: CallbackQuery, state: FSMContext):
-    parts = call.data.split("_")
-    uid = int(parts[1])
-    mid = int(parts[2])
-    
-    await state.update_data(reply_uid=uid, reply_mid=mid)
-    await state.set_state(Form.adm_reply)
-    
-    await call.message.answer(f"📝 <b>Foydalanuvchiga (ID: {uid}) javob matnini kiriting:</b>", reply_markup=Keyboards.just_back(), parse_mode="HTML")
-    await call.answer()
-
-@dp.message(Form.adm_reply)
-async def support_reply_send(message: Message, state: FSMContext, bot: Bot):
-    if message.from_user.id != Config.ADMIN_ID: return
-    
-    data = await state.get_data()
-    uid = data['reply_uid']
-    mid = data['reply_mid']
-    reply_text = message.text or ""
-    
-    u = DB.fetchone("SELECT notifications FROM users WHERE uid=?", (uid,))
-    
-    user_msg = (
-        f"📩 <b>ADMINISTRATSIYADAN JAVOB (Murojaat #{mid})</b>\n"
-        f"{Config.D_LINE}\n\n"
-        f"<i>{html.escape(reply_text)}</i>\n\n"
-        f"{Config.S_LINE}\n"
-        f"Hurmat bilan, Tizim Ma'muriyati 👑"
-    )
-    
-    try:
-        if u and u['notifications'] == 1:
-            await bot.send_message(uid, user_msg, parse_mode="HTML")
-        DB.execute("UPDATE support_messages SET is_replied=1 WHERE mid=?", (mid,))
-        await message.answer("✅ <b>Javob yetkazildi!</b>", reply_markup=Keyboards.admin_menu(), parse_mode="HTML")
-    except Exception as e:
-        await message.answer(f"❌ Xatolik: foydalanuvchi botni bloklagan bo'lishi mumkin.\n`{str(e)}`", parse_mode="HTML")
-        
-    await state.clear()
-
-
-# ==========================================================================================
-# 🌐 19. INTEGRATSIYALASHGAN API WEB PORTI (KUCHAYTIRILGAN)
-# ==========================================================================================
-async def api_login(request: web.Request):
+async def api_login(request):
+    """Veb-saytdan kelgan so'rovlarni qabul qilib, kodni tekshirish API'si."""
     if request.method == 'OPTIONS':
         return web.Response(headers={
             'Access-Control-Allow-Origin': '*',
@@ -1112,48 +972,60 @@ async def api_login(request: web.Request):
     try:
         data = await request.json()
         entered_code = data.get("student_id", "").strip()
-        client_ip = request.remote # IP manzilini olish
+        client_ip = request.remote or "Unknown IP"
+        user_agent = request.headers.get("User-Agent", "Unknown Device")
+        now_iso = datetime.now().isoformat()
         
-        web_user = DB.fetchone("SELECT * FROM web_codes WHERE code=?", (entered_code,))
+        web_user = await AsyncDB.fetchone("SELECT * FROM web_codes WHERE code=?", (entered_code,))
         
         if web_user:
             uid = web_user["uid"]
-            user = DB.fetchone("SELECT * FROM users WHERE uid=?", (uid,))
+            user = await AsyncDB.fetchone("SELECT * FROM users WHERE uid=?", (uid,))
             
             if user:
-                if user['is_banned']:
-                    # Tarixga yozish (Muvaffaqiyatsiz)
-                    DB.execute("INSERT INTO login_history (uid, ip_address, login_time, status) VALUES (?,?,?,?)", (uid, client_ip, datetime.now().isoformat(), 'banned'))
-                    return web.json_response({"success": False, "error": "Hisobingiz bloklangan!"}, status=403, headers={'Access-Control-Allow-Origin': '*'})
+                if user['is_banned'] == 1:
+                    # Banned user attempt
+                    await AsyncDB.execute(
+                        "INSERT INTO login_history (uid, ip_address, user_agent, login_time, status) VALUES (?,?,?,?,?)",
+                        (uid, client_ip, user_agent, now_iso, "FAILED_BANNED")
+                    )
+                    return web.json_response({
+                        "success": False, "error": "Sizning hisobingiz bloklangan!"
+                    }, status=403, headers={'Access-Control-Allow-Origin': '*'})
                 
-                # Tarixga yozish (Muvaffaqiyatli)
-                DB.execute("INSERT INTO login_history (uid, ip_address, login_time, status) VALUES (?,?,?,?)", (uid, client_ip, datetime.now().isoformat(), 'success'))
+                # Successful login
+                await AsyncDB.execute(
+                    "INSERT INTO login_history (uid, ip_address, user_agent, login_time, status) VALUES (?,?,?,?,?)",
+                    (uid, client_ip, user_agent, now_iso, "SUCCESS")
+                )
                 
                 return web.json_response({
                     "success": True, 
                     "name": user["fullname"], 
                     "uid": user["uid"], 
-                    "role": "admin" if user["uid"] == Config.ADMIN_ID else "user",
-                    "points": user["points"]
+                    "role": "admin" if user["uid"] == Config.ADMIN_ID else "user"
                 }, headers={'Access-Control-Allow-Origin': '*'})
                 
         return web.json_response({
             "success": False, 
-            "error": "Tizim kodi noto'g'ri yoki yaroqsiz! Bot orqali yangi kod yarating."
-        }, status=401, headers={'Access-Control-Allow-Origin': '*'})
+            "error": "Kod noto'g'ri yoki ro'yxatdan o'tmagan! Botdan yangi kod oling."
+        }, status=400, headers={'Access-Control-Allow-Origin': '*'})
 
     except Exception as e:
         logger.error(f"API Xatolik: {e}")
-        return web.json_response({"success": False, "error": "Ichki server xatoligi!"}, status=500, headers={'Access-Control-Allow-Origin': '*'})
-
-async def handle_root(request: web.Request):
-    return web.Response(text="💎 A'lo Ta'lim Premium API Integratsiyasi 100% Faol holatda. Version: 5.5 PRO")
+        return web.json_response({"success": False, "error": "Server ichki xatoligi."}, status=500, headers={'Access-Control-Allow-Origin': '*'})
 
 
 # ==========================================================================================
-# 🚀 20. SERVER VA BOT POLLING START
+# 🚀 13. DASTURNI ISHGA TUSHIRISH (ENTRY POINT)
 # ==========================================================================================
-async def start_web_server():
+async def main():
+    logger.info("Starting A'lo Ta'lim Premium Bot System...")
+    
+    # 1. Bazani tayyorlash
+    await AsyncDB.setup()
+    
+    # 2. Veb serverni sozlash (aiohttp)
     app = web.Application()
     app.router.add_get("/", handle_root)
     app.router.add_options("/api/login", api_login)
@@ -1161,33 +1033,24 @@ async def start_web_server():
     
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", Config.PORT)
+    site = web.TCPSite(runner, Config.HOST, Config.PORT)
     await site.start()
-    logger.info(f"🌐 Veb server {Config.PORT}-portda ishga tushdi.")
+    logger.info(f"Web API running on http://{Config.HOST}:{Config.PORT}")
 
-async def main():
+    # 3. Botni sozlash va Pollingni boshlash
+    await bot.set_my_commands([
+        BotCommand(command="start", description="🏠 Tizimni yuklash (Asosiy menyu)")
+    ])
+    
+    logger.info("Bot polling is started.")
     try:
-        # DB ni ishga tushirish
-        DB.setup()
-        
-        # Web serverni alohida task qilib ishga tushirish
-        asyncio.create_task(start_web_server())
-
-        # Bot buyruqlarini sozlash
-        await bot.set_my_commands([
-            BotCommand(command="start", description="🏠 Tizimni qayta ishga tushirish")
-        ])
-        
-        logger.info("💎 A'LO TA'LIM PREMIUM TIZIMI ISHGA TUSHDI...")
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
-        
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
     finally:
         await bot.session.close()
+        await runner.cleanup()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot to'xtatildi!")
+        logger.info("Bot stopped correctly.")
